@@ -1,0 +1,42 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 背景深藍圓形底座與科技青藍外框 -->
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M54,14 A40,40 0 1 1 53.99,14 Z" />
+    <path
+        android:strokeColor="#0EA5E9"
+        android:strokeWidth="2.5"
+        android:pathData="M54,16 A38,38 0 1 1 53.99,16 Z" />
+
+    <!-- 漢字「天」第一橫筆 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:pathData="M40,36 L68,36" />
+
+    <!-- 漢字「天」第二橫筆 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:pathData="M29,50 L79,50" />
+
+    <!-- 漢字「天」撇筆 (丿) -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:pathData="M54,34 C53,54 48,70 33,80" />
+
+    <!-- 漢字「天」捺筆 (㇏) -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:pathData="M52,51 C59,64 67,73 77,80" />
+</vector>

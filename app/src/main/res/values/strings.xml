@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Fake GPS Pro</string>
+    <string name="mock_service_channel_name">模擬定位常駐服務</string>
+    <string name="mock_service_channel_desc">維持背景與遊戲中模擬座標不中斷</string>
+    <string name="mock_running_title">Fake GPS 正在模擬定位中</string>
+    <string name="mock_running_content">點擊返回 App 或使用懸浮搖桿控制位置</string>
+    <string name="btn_stop">停止模擬</string>
+    <string name="btn_start">開始模擬</string>
+    <string name="btn_joystick">懸浮搖桿</string>
+    <string name="permission_overlay_prompt">請開啟「顯示在其他應用程式上層」權限以使用懸浮搖桿</string>
+    <string name="permission_mock_prompt">請至「開發人員選項」->「選取模擬位置資訊應用程式」選擇 Fake GPS</string>
+</resources>
