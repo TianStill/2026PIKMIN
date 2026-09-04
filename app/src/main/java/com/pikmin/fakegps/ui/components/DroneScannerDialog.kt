@@ -48,7 +48,7 @@ fun DroneScannerDialog(
 
     var selectedRadiusKm by remember { mutableStateOf(1.5) }
     var selectedTypes by remember { mutableStateOf(MushroomType.ALL_TARGETS) }
-    var dwellSeconds by remember { mutableStateOf(2.5f) }
+    var dwellSeconds by remember { mutableStateOf(3.2f) }
 
     // 相片辨識測試狀態
     var testBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -427,8 +427,8 @@ fun DroneScannerDialog(
                     Slider(
                         value = dwellSeconds,
                         onValueChange = { dwellSeconds = it },
-                        valueRange = 1.5f..4.0f,
-                        steps = 4
+                        valueRange = 2.0f..6.0f,
+                        steps = 7
                     )
                 }
 

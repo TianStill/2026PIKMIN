@@ -14,13 +14,13 @@ object DronePathGenerator {
      * @param centerLat 中心緯度
      * @param centerLng 中心經度
      * @param radiusKm 搜索半徑 (公里)
-     * @param stepMeters 步進距離 (公尺，預設 350 公尺，完美覆蓋 Pikmin Bloom 300m 迷霧視野)
+     * @param stepMeters 步進距離 (公尺，由 350m 精細化至 220m，消除螺旋圈距盲區並無縫覆蓋遊戲視界)
      */
     fun generateSpiralWaypoints(
         centerLat: Double,
         centerLng: Double,
         radiusKm: Double,
-        stepMeters: Double = 350.0
+        stepMeters: Double = 220.0
     ): List<LocationPoint> {
         val waypoints = mutableListOf<LocationPoint>()
 

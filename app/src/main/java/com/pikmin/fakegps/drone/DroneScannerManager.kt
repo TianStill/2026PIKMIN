@@ -225,7 +225,7 @@ object DroneScannerManager {
 
     private var currentWaypoints: List<LocationPoint> = emptyList()
     private var currentTargetTypes: Set<MushroomType> = emptySet()
-    private var currentDwellSeconds: Float = 2.5f
+    private var currentDwellSeconds: Float = 3.2f
     private var currentStartIndex: Int = 0
 
     /**
@@ -237,7 +237,7 @@ object DroneScannerManager {
         centerLng: Double,
         radiusKm: Double,
         targetTypes: Set<MushroomType>,
-        dwellSeconds: Float = 2.5f
+        dwellSeconds: Float = 3.2f
     ) {
         val waypoints = DronePathGenerator.generateSpiralWaypoints(
             centerLat = centerLat,
@@ -324,42 +324,40 @@ object DroneScannerManager {
                     MockLocationService.updateLocation(context, waypoint)
                 }
 
-                // 停留等待 Pikmin Bloom 地圖載入週遭實體 (預設 2.5 秒)
-                delay(dwellMillis)
+                // 🌟 連續動態採樣窗口：克服 Pikmin Bloom 伺服器載入 3D 蘑菇延遲問題
+                // 先等待 1200ms 給予遊戲傳送網路請求與清空舊座標
+                delay(1200L)
+
+                val startTime = System.currentTimeMillis()
+                var foundMushroom: DetectedMushroom? = null
+
+                // 在停留窗口內，每 350ms 動態取幀辨識一次，一旦 3D 蘑菇自伺服器載入立刻抓取並煞車鎖定！
+                while (System.currentTimeMillis() - startTime < (dwellMillis - 1200L) && isActive) {
+                    try {
+                        val capturedBitmap = captureCurrentScreen()
+                        if (capturedBitmap != null) {
+                            val detected = MushroomDetector.detectMushrooms(capturedBitmap, targetTypes)
+                            if (detected.isNotEmpty()) {
+                                foundMushroom = detected.first()
+                                break // 成功於動態窗口內捕捉到目標！立刻停止採樣
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        e.printStackTrace()
+                    }
+                    delay(350L)
+                }
 
                 if (!isActive) break
 
-                // 嘗試擷取畫面並進行 CV 色相分析 (若截圖異常不中斷巡航)
-                try {
-                    var capturedBitmap = captureCurrentScreen()
-                    if (capturedBitmap == null) {
-                        // 若第一次取幀為空，微延遲 400ms 再重試一次，防止遊戲畫面渲染延遲
-                        delay(400)
-                        capturedBitmap = captureCurrentScreen()
+                if (foundMushroom != null) {
+                    val bestTarget = foundMushroom
+                    currentStartIndex = index + 1 // 下次繼續時從下一點開始！
+                    withContext(Dispatchers.Main) {
+                        // 發現目標！
+                        onTargetDiscovered(context, bestTarget, waypoint, prefs)
                     }
-
-                    if (capturedBitmap != null) {
-                        val detected = MushroomDetector.detectMushrooms(capturedBitmap, targetTypes)
-
-                        if (detected.isNotEmpty()) {
-                            val bestTarget = detected.first()
-                            currentStartIndex = index + 1 // 下次繼續時從下一點開始！
-                            withContext(Dispatchers.Main) {
-                                // 發現目標！
-                                onTargetDiscovered(context, bestTarget, waypoint, prefs)
-                            }
-                            break // 發現目標立即停止巡航，鎖定座標！
-                        }
-                    } else {
-                        android.util.Log.e("DroneScanner", "點 $index 截圖為空 (latestBitmap == null)")
-                        if (index == startIndex) {
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "⚠️ 提示：尚未收到遊戲畫面，正在等待虛擬螢幕更新...", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                } catch (e: Throwable) {
-                    e.printStackTrace()
+                    break // 發現目標立即停止巡航，鎖定座標！
                 }
             }
 
