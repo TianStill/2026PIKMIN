@@ -24,29 +24,40 @@ enum class MushroomType(
     val colorHex: Long
 ) {
     // 👑 1. 巨大活動特殊菇
-    GIANT_EVENT("巨大活動特殊菇", "巨大活動菇", MushroomCategory.GIANT_EVENT, 0xFFF59E0B),
+    GIANT_EVENT("巨大活動特殊菇", "活動菇", MushroomCategory.GIANT_EVENT, 0xFFF59E0B),
 
     // 🌈 2. 大顏色菇 (每一種顏色)
-    LARGE_RED("大型紅蘑菇", "大紅菇", MushroomCategory.LARGE_COLOR, 0xFFEF4444),
-    LARGE_YELLOW("大型黃蘑菇", "大黃菇", MushroomCategory.LARGE_COLOR, 0xFFEAB308),
-    LARGE_BLUE("大型藍蘑菇", "大藍菇", MushroomCategory.LARGE_COLOR, 0xFF3B82F6),
-    LARGE_PURPLE("大型紫蘑菇", "大紫菇", MushroomCategory.LARGE_COLOR, 0xFF9333EA),
-    LARGE_WHITE("大型白蘑菇", "大白菇", MushroomCategory.LARGE_COLOR, 0xFFF1F5F9),
-    LARGE_PINK("大型粉羽蘑菇", "大粉菇", MushroomCategory.LARGE_COLOR, 0xFFEC4899),
-    LARGE_GRAY("大型灰岩蘑菇", "大灰菇", MushroomCategory.LARGE_COLOR, 0xFF64748B),
+    LARGE_RED("大紅蘑菇", "大紅菇", MushroomCategory.LARGE_COLOR, 0xFFEF4444),
+    LARGE_YELLOW("大黃蘑菇", "大黃菇", MushroomCategory.LARGE_COLOR, 0xFFEAB308),
+    LARGE_BLUE("大藍蘑菇", "大藍菇", MushroomCategory.LARGE_COLOR, 0xFF3B82F6),
+    LARGE_PURPLE("大紫蘑菇", "大紫菇", MushroomCategory.LARGE_COLOR, 0xFF9333EA),
+    LARGE_WHITE("大白蘑菇", "大白菇", MushroomCategory.LARGE_COLOR, 0xFFF1F5F9),
+    LARGE_PINK("大粉羽蘑菇", "大粉菇", MushroomCategory.LARGE_COLOR, 0xFFEC4899),
+    LARGE_GRAY("大灰岩蘑菇", "大灰菇", MushroomCategory.LARGE_COLOR, 0xFF64748B),
 
     // ⚡ 3. 大元素菇 (每一種元素)
-    LARGE_FIRE("大型火蘑菇 🔥", "大火菇", MushroomCategory.LARGE_ELEMENT, 0xFFFF4500),
-    LARGE_WATER("大型水蘑菇 💧", "大水菇", MushroomCategory.LARGE_ELEMENT, 0xFF06B6D4),
-    LARGE_ELECTRIC("大型電蘑菇 ⚡", "大電菇", MushroomCategory.LARGE_ELEMENT, 0xFFFACC15),
-    LARGE_CRYSTAL("大型水晶蘑菇 💎", "水晶菇", MushroomCategory.LARGE_ELEMENT, 0xFFA5F3FC),
-    LARGE_POISON("大型毒蘑菇 🧪", "大毒菇", MushroomCategory.LARGE_ELEMENT, 0xFFA855F7);
+    LARGE_FIRE("火蘑菇 🔥", "火菇", MushroomCategory.LARGE_ELEMENT, 0xFFFF4500),
+    LARGE_WATER("水蘑菇 💧", "水菇", MushroomCategory.LARGE_ELEMENT, 0xFF06B6D4),
+    LARGE_ELECTRIC("電蘑菇 ⚡", "電菇", MushroomCategory.LARGE_ELEMENT, 0xFFFACC15),
+    LARGE_CRYSTAL("水晶蘑菇 💎", "水晶菇", MushroomCategory.LARGE_ELEMENT, 0xFFA5F3FC),
+    LARGE_POISON("毒蘑菇 🧪", "毒菇", MushroomCategory.LARGE_ELEMENT, 0xFFA855F7);
 
     companion object {
         val ALL_TARGETS = entries.toSet()
         val EVENT_TARGETS = setOf(GIANT_EVENT)
         val COLOR_TARGETS = entries.filter { it.category == MushroomCategory.LARGE_COLOR }.toSet()
         val ELEMENT_TARGETS = entries.filter { it.category == MushroomCategory.LARGE_ELEMENT }.toSet()
+
+        /**
+         * 取得對外顯示完整標籤
+         */
+        fun getDisplayName(type: MushroomType): String {
+            return when (type.category) {
+                MushroomCategory.GIANT_EVENT -> "👑 ${type.title}"
+                MushroomCategory.LARGE_ELEMENT -> "⚡ 大元素菇【${type.title}】"
+                MushroomCategory.LARGE_COLOR -> "🍄 大顏色菇【${type.title}】"
+            }
+        }
     }
 }
 
@@ -296,29 +307,29 @@ object MushroomDetector {
         }
 
         return when {
-            // 🔥 2. 大火蘑菇 (LARGE_FIRE) - 明烈紅橘火光與燃燒火舌 (高飽和鮮明橘紅)
-            h in 12f..38f && s >= 0.40f && v >= 0.42f -> Pair(FAM_FIRE_RED, MushroomType.LARGE_FIRE)
+            // 🔥 2. 火蘑菇 (LARGE_FIRE) - 高飽和鮮明橘紅火焰 (S >= 0.52，排除普通紅菇高光)
+            h in 12f..36f && s >= 0.52f && v >= 0.45f -> Pair(FAM_FIRE_RED, MushroomType.LARGE_FIRE)
 
-            // ⚡ 3. 大電蘑菇 (LARGE_ELECTRIC) - 晶亮金黃電弧 (高明度電弧黃)
-            h in 40f..68f && s >= 0.28f && v >= 0.55f -> Pair(FAM_ELECTRIC_YELLOW, MushroomType.LARGE_ELECTRIC)
+            // ⚡ 3. 電蘑菇 (LARGE_ELECTRIC) - 晶亮金黃電弧 (高明度電弧黃)
+            h in 40f..68f && s in 0.28f..0.65f && v >= 0.60f -> Pair(FAM_ELECTRIC_YELLOW, MushroomType.LARGE_ELECTRIC)
 
             // 🟡 4. 普通大黃菇 (LARGE_YELLOW)
-            h in 38f..65f && s >= 0.28f && v in 0.35f..0.98f -> Pair(FAM_ELECTRIC_YELLOW, MushroomType.LARGE_YELLOW)
+            h in 38f..65f && s >= 0.25f && v in 0.35f..0.98f -> Pair(FAM_ELECTRIC_YELLOW, MushroomType.LARGE_YELLOW)
 
             // 🔴 5. 普通大紅菇 (LARGE_RED)
-            ((h in 345f..360f) || (h in 0f..18f)) && s >= 0.30f && v >= 0.26f -> Pair(FAM_FIRE_RED, MushroomType.LARGE_RED)
+            ((h in 345f..360f) || (h in 0f..20f)) && s >= 0.28f && v >= 0.26f -> Pair(FAM_FIRE_RED, MushroomType.LARGE_RED)
 
-            // 🧪 6. 大毒蘑菇 (LARGE_POISON) - 碧青/薄荷綠毒霧霧氣 (Hue 142..185) 或 劇毒紫紅傘蓋 (Hue 265..335)
-            (h in 142f..185f && s >= 0.20f && v >= 0.38f) || (h in 265f..335f && s >= 0.18f && v >= 0.20f) -> Pair(FAM_POISON, MushroomType.LARGE_POISON)
+            // 🧪 6. 毒蘑菇 (LARGE_POISON) - 碧青/薄荷綠毒霧霧氣 (Hue 140..175 且 S >= 0.30) 或 劇毒紫紅傘蓋 (Hue 265..335)
+            (h in 140f..175f && s >= 0.30f && v >= 0.35f) || (h in 265f..335f && s >= 0.20f && v >= 0.20f) -> Pair(FAM_POISON, MushroomType.LARGE_POISON)
 
-            // 💧 7. 大水蘑菇 (LARGE_WATER) - 飽滿水潤青藍水滴 (湛藍流水水花)
-            h in 182f..225f && s >= 0.25f && v in 0.32f..0.96f -> Pair(FAM_WATER_BLUE, MushroomType.LARGE_WATER)
+            // 💧 7. 水蘑菇 (LARGE_WATER) - 飽滿水潤青藍水滴 (Hue 180..215 且 S >= 0.28)
+            h in 180f..215f && s >= 0.28f && v in 0.32f..0.96f -> Pair(FAM_WATER_BLUE, MushroomType.LARGE_WATER)
 
-            // 💎 8. 大水晶蘑菇 (LARGE_CRYSTAL) - 冰透低飽和微藍反光晶面 (高明度極淡透冰藍)
-            h in 175f..235f && s in 0.07f..0.38f && v >= 0.60f -> Pair(FAM_CRYSTAL, MushroomType.LARGE_CRYSTAL)
+            // 💎 8. 水晶蘑菇 (LARGE_CRYSTAL) - 冰透低飽和微藍反光晶面 (高明度極淡透冰藍，S in 0.08..0.26)
+            h in 175f..235f && s in 0.08f..0.26f && v >= 0.65f -> Pair(FAM_CRYSTAL, MushroomType.LARGE_CRYSTAL)
 
             // 🔵 9. 普通大藍菇 (LARGE_BLUE)
-            h in 195f..250f && s >= 0.25f && v >= 0.22f -> Pair(FAM_WATER_BLUE, MushroomType.LARGE_BLUE)
+            h in 215f..255f && s >= 0.25f && v >= 0.22f -> Pair(FAM_WATER_BLUE, MushroomType.LARGE_BLUE)
 
             // 👑 10. 巨大活動特殊菇 (GIANT_EVENT)
             h in 18f..48f && s >= 0.38f && v >= 0.50f -> Pair(FAM_EVENT, MushroomType.GIANT_EVENT)
@@ -478,7 +489,7 @@ object MushroomDetector {
                                                 y = origY,
                                                 radius = (32 / scale).toInt().coerceAtLeast(24),
                                                 confidence = 0.96f,
-                                                isGiant = validPixels >= 60 || targetType.category == MushroomCategory.LARGE_ELEMENT
+                                                isGiant = targetType == MushroomType.GIANT_EVENT
                                             )
                                         )
                                     }
@@ -516,7 +527,7 @@ object MushroomDetector {
             val drawRadius = (m.radius * 1.3f).coerceAtLeast(35f)
             canvas.drawCircle(m.x.toFloat(), m.y.toFloat(), drawRadius, strokePaint)
 
-            val label = if (m.isGiant) "👑 ${m.type.title}" else m.type.title
+            val label = MushroomType.getDisplayName(m.type)
             canvas.drawText(label, m.x.toFloat() - (drawRadius * 0.8f), m.y.toFloat() - drawRadius - 8f, textPaint)
         }
 

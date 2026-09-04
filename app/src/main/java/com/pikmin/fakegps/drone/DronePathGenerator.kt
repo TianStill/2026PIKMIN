@@ -14,13 +14,13 @@ object DronePathGenerator {
      * @param centerLat 中心緯度
      * @param centerLng 中心經度
      * @param radiusKm 搜索半徑 (公里)
-     * @param stepMeters 步進距離 (公尺，由 350m 精細化至 220m，消除螺旋圈距盲區並無縫覆蓋遊戲視界)
+     * @param stepMeters 步進距離 (公尺，預設 360m 黃金航距，兼顧遊戲 450m 視界無死角與極速覆蓋)
      */
     fun generateSpiralWaypoints(
         centerLat: Double,
         centerLng: Double,
         radiusKm: Double,
-        stepMeters: Double = 220.0
+        stepMeters: Double = 360.0
     ): List<LocationPoint> {
         val waypoints = mutableListOf<LocationPoint>()
 

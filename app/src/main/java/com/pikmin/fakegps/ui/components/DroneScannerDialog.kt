@@ -38,7 +38,7 @@ import com.pikmin.fakegps.drone.DroneScannerManager
 fun DroneScannerDialog(
     currentLat: Double,
     currentLng: Double,
-    onStartDroneScan: (radiusKm: Double, targetTypes: Set<MushroomType>, dwellSec: Float) -> Unit,
+    onStartDroneScan: (radiusKm: Double, targetTypes: Set<MushroomType>, dwellSec: Float, stepMeters: Double) -> Unit,
     onResumeDroneScan: () -> Unit = {},
     onStopDroneScan: () -> Unit,
     onDismiss: () -> Unit
@@ -48,7 +48,9 @@ fun DroneScannerDialog(
 
     var selectedRadiusKm by remember { mutableStateOf(1.5) }
     var selectedTypes by remember { mutableStateOf(MushroomType.ALL_TARGETS) }
-    var dwellSeconds by remember { mutableStateOf(3.2f) }
+    var speedMode by remember { mutableStateOf(1) } // 0: 極速 (380m / 1.8s), 1: 推薦 (360m / 2.2s), 2: 精細 (250m / 2.8s)
+    var dwellSeconds by remember { mutableStateOf(2.2f) }
+    var stepMeters by remember { mutableStateOf(360.0) }
 
     // 相片辨識測試狀態
     var testBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -414,21 +416,69 @@ fun DroneScannerDialog(
                     }
                 }
 
-                // 4. 每個點加載等待時間
-                Column {
+                // 4. 巡弋速度模式與每點停留時間
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("⚡ 巡航速度模式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("⏱️ 每個網格停留時間", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        listOf(
+                            Triple(0, "⚡ 極速模式", "380m / 1.8s"),
+                            Triple(1, "🚀 推薦標準", "360m / 2.2s"),
+                            Triple(2, "🎯 精細搜尋", "250m / 2.8s")
+                        ).forEach { (mode, title, subtitle) ->
+                            val isSelected = speedMode == mode
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        speedMode = mode
+                                        when (mode) {
+                                            0 -> { stepMeters = 380.0; dwellSeconds = 1.8f }
+                                            1 -> { stepMeters = 360.0; dwellSeconds = 2.2f }
+                                            2 -> { stepMeters = 250.0; dwellSeconds = 2.8f }
+                                        }
+                                    }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = subtitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f) else MaterialTheme.colorScheme.outline,
+                                        fontSize = 9.5.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⏱️ 每點等待時間 (微調)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         Text("${String.format("%.1f", dwellSeconds)} 秒", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
-                    Text("給予 Pikmin Bloom 地圖讀取周邊蘑菇之緩衝時間", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                     Slider(
                         value = dwellSeconds,
                         onValueChange = { dwellSeconds = it },
-                        valueRange = 2.0f..6.0f,
-                        steps = 7
+                        valueRange = 1.5f..5.0f,
+                        steps = 6
                     )
                 }
 
@@ -469,7 +519,7 @@ fun DroneScannerDialog(
             } else {
                 Button(
                     onClick = {
-                        onStartDroneScan(selectedRadiusKm, selectedTypes, dwellSeconds)
+                        onStartDroneScan(selectedRadiusKm, selectedTypes, dwellSeconds, stepMeters)
                     },
                     shape = RoundedCornerShape(12.dp)
                 ) {

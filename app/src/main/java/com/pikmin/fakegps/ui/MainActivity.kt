@@ -108,6 +108,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+data class DroneScanConfig(
+    val radiusKm: Double,
+    val targetTypes: Set<com.pikmin.fakegps.cv.MushroomType>,
+    val dwellSec: Float,
+    val stepMeters: Double
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
@@ -138,7 +145,7 @@ fun MainScreen(viewModel: MainViewModel) {
     var showLayerMenu by remember { mutableStateOf(false) }
     var showDroneDialog by remember { mutableStateOf(false) }
 
-    var pendingScanParams by remember { mutableStateOf<Triple<Double, Set<com.pikmin.fakegps.cv.MushroomType>, Float>?>(null) }
+    var pendingScanParams by remember { mutableStateOf<DroneScanConfig?>(null) }
     val mediaProjectionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -155,28 +162,30 @@ fun MainScreen(viewModel: MainViewModel) {
                         com.pikmin.fakegps.drone.DroneScannerManager.setupMediaProjection(context, resultCode, data)
                     }, 350L)
                 }
-                pendingScanParams?.let { (radius, types, dwell) ->
+                pendingScanParams?.let { config ->
                     com.pikmin.fakegps.drone.DroneScannerManager.startScan(
                         context = context,
                         centerLat = targetLocation.latitude,
                         centerLng = targetLocation.longitude,
-                        radiusKm = radius,
-                        targetTypes = types,
-                        dwellSeconds = dwell
+                        radiusKm = config.radiusKm,
+                        targetTypes = config.targetTypes,
+                        dwellSeconds = config.dwellSec,
+                        stepMeters = config.stepMeters
                     )
                 }
             }, 350L)
             Toast.makeText(context, "🛸 無人機已起飛！請切換至《Pikmin Bloom》遊戲畫面！", Toast.LENGTH_LONG).show()
         } else {
             // 若取消授權截圖，依然照常執行 GPS 網格巡弋
-            pendingScanParams?.let { (radius, types, dwell) ->
+            pendingScanParams?.let { config ->
                 com.pikmin.fakegps.drone.DroneScannerManager.startScan(
                     context = context,
                     centerLat = targetLocation.latitude,
                     centerLng = targetLocation.longitude,
-                    radiusKm = radius,
-                    targetTypes = types,
-                    dwellSeconds = dwell
+                    radiusKm = config.radiusKm,
+                    targetTypes = config.targetTypes,
+                    dwellSeconds = config.dwellSec,
+                    stepMeters = config.stepMeters
                 )
             }
             Toast.makeText(context, "🛸 無人機自走巡弋已啟動！請切換至遊戲！", Toast.LENGTH_LONG).show()
@@ -552,10 +561,10 @@ fun MainScreen(viewModel: MainViewModel) {
                 DroneScannerDialog(
                     currentLat = targetLocation.latitude,
                     currentLng = targetLocation.longitude,
-                    onStartDroneScan = { radiusKm, targetTypes, dwellSec ->
+                    onStartDroneScan = { radiusKm, targetTypes, dwellSec, stepMeters ->
                         showDroneDialog = false // 立即關閉對話框
                         val mpManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                        pendingScanParams = Triple(radiusKm, targetTypes, dwellSec)
+                        pendingScanParams = DroneScanConfig(radiusKm, targetTypes, dwellSec, stepMeters)
                         if (!isMocking) {
                             viewModel.startMocking()
                         }
@@ -569,7 +578,8 @@ fun MainScreen(viewModel: MainViewModel) {
                                 centerLng = targetLocation.longitude,
                                 radiusKm = radiusKm,
                                 targetTypes = targetTypes,
-                                dwellSeconds = dwellSec
+                                dwellSeconds = dwellSec,
+                                stepMeters = stepMeters
                             )
                             Toast.makeText(context, "🛸 無人機已起飛！請切換至《Pikmin Bloom》！", Toast.LENGTH_LONG).show()
                         }

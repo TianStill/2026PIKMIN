@@ -49,6 +49,16 @@ data class DroneScanStatus(
 )
 
 /**
+ * 當次巡檢已記錄之蘑菇資料 (用於防止同一顆菇重複跳出)
+ */
+data class DiscoveredMushroomRecord(
+    val type: MushroomType,
+    val latitude: Double,
+    val longitude: Double,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
  * 無人機雷達巡航與截圖檢測管理器
  */
 object DroneScannerManager {
@@ -225,8 +235,11 @@ object DroneScannerManager {
 
     private var currentWaypoints: List<LocationPoint> = emptyList()
     private var currentTargetTypes: Set<MushroomType> = emptySet()
-    private var currentDwellSeconds: Float = 3.2f
+    private var currentDwellSeconds: Float = 2.2f
     private var currentStartIndex: Int = 0
+
+    // 當次巡檢已記錄之蘑菇庫 (避免相鄰航點看見同一顆菇時重複跳出警報)
+    private val foundMushroomsThisSession = mutableListOf<DiscoveredMushroomRecord>()
 
     /**
      * 啟動無人機螺旋巡弋掃描 (從頭開始)
@@ -237,12 +250,18 @@ object DroneScannerManager {
         centerLng: Double,
         radiusKm: Double,
         targetTypes: Set<MushroomType>,
-        dwellSeconds: Float = 3.2f
+        dwellSeconds: Float = 2.2f,
+        stepMeters: Double = 360.0
     ) {
+        synchronized(foundMushroomsThisSession) {
+            foundMushroomsThisSession.clear()
+        }
+
         val waypoints = DronePathGenerator.generateSpiralWaypoints(
             centerLat = centerLat,
             centerLng = centerLng,
-            radiusKm = radiusKm
+            radiusKm = radiusKm,
+            stepMeters = stepMeters
         )
 
         currentWaypoints = waypoints
@@ -277,6 +296,55 @@ object DroneScannerManager {
         )
     }
 
+    /**
+     * 依據螢幕上蘑菇像素座標與目前航點，估算蘑菇之實際地理經緯度
+     */
+    private fun estimateMushroomLocation(waypoint: LocationPoint, mushroom: DetectedMushroom): LocationPoint {
+        val centerPxX = screenWidth / 2.0
+        val centerPxY = screenHeight * 0.58
+        val metersPerPixel = 450.0 / screenWidth.coerceAtLeast(1)
+        val dxMeters = (mushroom.x - centerPxX) * metersPerPixel
+        val dyMeters = (centerPxY - mushroom.y) * metersPerPixel
+
+        val metersPerLat = 111132.954
+        val metersPerLng = 111132.954 * kotlin.math.cos(Math.toRadians(waypoint.latitude))
+
+        val estLat = waypoint.latitude + (dyMeters / metersPerLat)
+        val estLng = waypoint.longitude + (dxMeters / metersPerLng)
+        return LocationPoint(estLat, estLng)
+    }
+
+    /**
+     * 檢查此目標蘑菇是否已在當次巡航中被發現並提醒過
+     * 同種類蘑菇距離 180m 內視為同一顆；不同種類則需相距 50m 內才視為同一實體
+     */
+    private fun isAlreadyDiscovered(estimatedLoc: LocationPoint, type: MushroomType): Boolean {
+        synchronized(foundMushroomsThisSession) {
+            return foundMushroomsThisSession.any { past ->
+                val dist = calculateDistanceMeters(
+                    estimatedLoc.latitude, estimatedLoc.longitude,
+                    past.latitude, past.longitude
+                )
+                if (past.type == type) {
+                    dist < 180.0
+                } else {
+                    dist < 50.0
+                }
+            }
+        }
+    }
+
+    private fun calculateDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371000.0 // 地球半徑 (公尺)
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+                kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+                kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+        return r * c
+    }
+
     private fun startScanInternal(
         context: Context,
         waypoints: List<LocationPoint>,
@@ -304,7 +372,8 @@ object DroneScannerManager {
         )
 
         scanJob = scope.launch(Dispatchers.Default) {
-            val dwellMillis = (dwellSeconds * 1000).toLong().coerceAtLeast(1500L)
+            val dwellMillis = (dwellSeconds * 1000).toLong().coerceAtLeast(1400L)
+            val initialDelay = if (dwellMillis <= 2000L) 850L else 1100L
 
             var consecutiveNullFrames = 0
 
@@ -327,30 +396,36 @@ object DroneScannerManager {
                 }
 
                 // 🌟 連續動態採樣窗口：克服 Pikmin Bloom 伺服器載入 3D 蘑菇延遲問題
-                // 先等待 1200ms 給予遊戲傳送網路請求與清空舊座標
-                delay(1200L)
+                delay(initialDelay)
 
                 val startTime = System.currentTimeMillis()
-                var foundMushroom: DetectedMushroom? = null
+                var foundMushroom: Pair<DetectedMushroom, LocationPoint>? = null
                 var capturedFramesAtThisPoint = 0
 
-                // 在停留窗口內，每 350ms 動態取幀辨識一次，一旦 3D 蘑菇自伺服器載入立刻抓取並煞車鎖定！
-                while (System.currentTimeMillis() - startTime < (dwellMillis - 1200L) && isActive) {
+                // 在停留窗口內動態採樣，檢查是否有當次未發現過的新蘑菇
+                while (System.currentTimeMillis() - startTime < (dwellMillis - initialDelay) && isActive) {
                     try {
                         val capturedBitmap = captureCurrentScreen()
                         if (capturedBitmap != null) {
                             capturedFramesAtThisPoint++
                             consecutiveNullFrames = 0
                             val detected = MushroomDetector.detectMushrooms(capturedBitmap, targetTypes)
-                            if (detected.isNotEmpty()) {
-                                foundMushroom = detected.first()
-                                break // 成功於動態窗口內捕捉到目標！立刻停止採樣
+                            
+                            // 排除當次巡航已發現過的同一顆蘑菇
+                            val newMushroom = detected.firstOrNull { m ->
+                                val estLoc = estimateMushroomLocation(waypoint, m)
+                                !isAlreadyDiscovered(estLoc, m.type)
+                            }
+                            if (newMushroom != null) {
+                                val estLoc = estimateMushroomLocation(waypoint, newMushroom)
+                                foundMushroom = Pair(newMushroom, estLoc)
+                                break // 成功捕捉到全新目標！立刻停止採樣
                             }
                         }
                     } catch (e: Throwable) {
                         e.printStackTrace()
                     }
-                    delay(350L)
+                    delay(250L)
                 }
 
                 if (capturedFramesAtThisPoint == 0) {
@@ -365,11 +440,16 @@ object DroneScannerManager {
                 if (!isActive) break
 
                 if (foundMushroom != null) {
-                    val bestTarget = foundMushroom
+                    val (bestTarget, estLoc) = foundMushroom
+                    synchronized(foundMushroomsThisSession) {
+                        foundMushroomsThisSession.add(
+                            DiscoveredMushroomRecord(bestTarget.type, estLoc.latitude, estLoc.longitude)
+                        )
+                    }
                     currentStartIndex = index + 1 // 下次繼續時從下一點開始！
                     withContext(Dispatchers.Main) {
                         // 發現目標！
-                        onTargetDiscovered(context, bestTarget, waypoint, prefs)
+                        onTargetDiscovered(context, bestTarget, estLoc, prefs)
                     }
                     break // 發現目標立即停止巡航，鎖定座標！
                 }
@@ -404,7 +484,7 @@ object DroneScannerManager {
         location: LocationPoint,
         prefs: PreferencesRepo
     ) {
-        val label = if (target.isGiant) "巨大${target.type.title}" else target.type.title
+        val label = MushroomType.getDisplayName(target.type)
 
         _status.value = _status.value.copy(
             isScanning = false,
@@ -429,7 +509,7 @@ object DroneScannerManager {
             e.printStackTrace()
         }
 
-        // 2. 發送最高優先級 Heads-up 橫幅通知 (即便在遊戲中也會直接在螢幕上方彈出橫幅 + 響鈴！)
+        // 2. 發送最高優先級 Heads-up 橫幅通知
         showHeadsUpNotification(context, label, location)
 
         // 3. 背景 Toast (若系統支援)
