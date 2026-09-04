@@ -36,16 +36,18 @@ fun LocationSearchBar(
 
     Column(modifier = modifier) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(27.dp),
             shadowElevation = 6.dp,
             color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,

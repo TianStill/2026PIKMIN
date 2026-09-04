@@ -215,13 +215,13 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
             )
 
-            // 2. 頂部搜尋欄與單獨右上角檢查版本按鈕
+            // 2. 頂部搜尋欄與單獨右上角檢查版本按鈕 (垂直置中對齊，等高 54dp 平整俐落)
             Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.Top
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 LocationSearchBar(
                     query = searchQuery,
@@ -240,13 +240,13 @@ fun MainScreen(viewModel: MainViewModel) {
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                // 🔄 單獨右上角檢查版本按鈕 (圓形卡片懸浮按鈕)
+                // 🔄 單獨右上角檢查版本按鈕 (圓形卡片懸浮按鈕，尺寸 54dp 與搜尋欄完全平整)
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                    color = MaterialTheme.colorScheme.surface,
                     shadowElevation = 6.dp,
-                    tonalElevation = 3.dp,
-                    modifier = Modifier.size(52.dp)
+                    tonalElevation = 2.dp,
+                    modifier = Modifier.size(54.dp)
                 ) {
                     IconButton(
                         onClick = {
@@ -260,42 +260,42 @@ fun MainScreen(viewModel: MainViewModel) {
                             imageVector = Icons.Default.SystemUpdate,
                             contentDescription = "Check for Updates",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
             }
 
-            // 3. 右側功能工具欄 (直放靠齊右下方，加大圖示方便大拇指單手按取)
+            // 3. 右側功能工具欄 (精緻緊湊排列，拉開底部間距至 148dp，絕不與底部卡片重疊)
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 115.dp, end = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(bottom = 148.dp, end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // 懸浮工具膠囊卡片
                 Surface(
-                    shape = RoundedCornerShape(26.dp),
+                    shape = RoundedCornerShape(22.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                     shadowElevation = 8.dp,
                     tonalElevation = 3.dp
                 ) {
                     Column(
-                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // 📍 1. 回到目前位置 (My Location)
                         IconButton(
                             onClick = { viewModel.moveToCurrentLocation() },
-                            modifier = Modifier.size(52.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.MyLocation,
                                 contentDescription = "My Location",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
@@ -303,13 +303,13 @@ fun MainScreen(viewModel: MainViewModel) {
                         Box {
                             IconButton(
                                 onClick = { showLayerMenu = true },
-                                modifier = Modifier.size(52.dp)
+                                modifier = Modifier.size(44.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Layers,
                                     contentDescription = "Map Layers",
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                             DropdownMenu(
@@ -351,65 +351,65 @@ fun MainScreen(viewModel: MainViewModel) {
                                 val msg = if (newState) "已開啟「切換回 APP 自動套用剪貼簿座標」" else "已關閉「切換回 APP 自動套用剪貼簿座標」"
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             },
-                            modifier = Modifier.size(52.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentPasteGo,
                                 contentDescription = "Toggle Auto Clipboard Paste",
                                 tint = if (isAutoClipboardEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
                         // ⭐ 4. 我的書籤收藏
                         IconButton(
                             onClick = { showFavoritesSheet = true },
-                            modifier = Modifier.size(52.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Star,
                                 contentDescription = "Favorites",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
                         // 🕒 5. 定位歷史紀錄 (最新 3 筆)
                         IconButton(
                             onClick = { showHistorySheet = true },
-                            modifier = Modifier.size(52.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.History,
                                 contentDescription = "Location History",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
                         // ✍️ 6. 手動精確輸入經緯度
                         IconButton(
                             onClick = { showCoordinatesDialog = true },
-                            modifier = Modifier.size(52.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PinDrop,
                                 contentDescription = "Manual Coordinates",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
                         // 🛸 7. 無人機尋菇雷達 (電腦視覺自動巡航)
                         IconButton(
                             onClick = { showDroneDialog = true },
-                            modifier = Modifier.size(52.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Radar,
                                 contentDescription = "Drone Radar",
                                 tint = if (droneStatus.isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     }

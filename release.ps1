@@ -76,8 +76,9 @@ Write-Host ("APK built successfully: {0:N2} MB" -f $apkSize) -ForegroundColor Gr
 
 # 5. Git Commit & Tag
 Write-Host "`nCommitting version change..." -ForegroundColor Cyan
-git add app/build.gradle.kts
-git commit -m "chore(release): bump version to $tag"
+Copy-Item $apkPath (Join-Path $PSScriptRoot "app-debug.apk") -Force
+git add -A
+git commit -m "chore(release): bump version to $tag - $Notes"
 git tag -a $tag -m "Release $tag - $Notes"
 
 # 6. Push to GitHub
