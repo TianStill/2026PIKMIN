@@ -67,6 +67,17 @@ data class DetectedMushroom(
  */
 object MushroomDetector {
 
+    // 色彩家族分組 (同一家族色彩才連通聚合，徹底防止白色道路與藍色河流串接誤判)
+    private const val FAM_FIRE_RED = 1
+    private const val FAM_ELECTRIC_YELLOW = 2
+    private const val FAM_WATER_BLUE = 3
+    private const val FAM_CRYSTAL = 4
+    private const val FAM_POISON = 5
+    private const val FAM_PURPLE_PINK = 6
+    private const val FAM_EVENT = 7
+    private const val FAM_WHITE = 8
+    private const val FAM_GRAY = 9
+
     /**
      * 分析遊戲畫面 Bitmap，支援多距離動態尺度與色票聚合投票
      */
@@ -96,51 +107,49 @@ object MushroomDetector {
         val pixels = IntArray(scaledW * scaledH)
         scaledBitmap.getPixels(pixels, 0, scaledW, 0, 0, scaledW, scaledH)
 
-        // 僅分析螢幕中段 (排除頂部 12% 狀態列與底部 14% 按鈕導航)
+        // 僅分析螢幕中段 (排除頂部 12% 狀態列與底部 12% 按鈕導航)
         val startY = (scaledH * 0.12f).toInt()
-        val endY = (scaledH * 0.86f).toInt()
+        val endY = (scaledH * 0.88f).toInt()
 
         val hsv = FloatArray(3)
-        // 標記矩陣：0=非目標背景，>0=MushroomType.ordinal + 1，255=實體亮白反光
+        // 家族標記矩陣：0=非目標背景，>0=色彩家族編號
+        val familyMask = IntArray(scaledW * scaledH)
+        // 具體蘑菇種類標記：0=無，>0=MushroomType.ordinal + 1
         val typeMask = IntArray(scaledW * scaledH)
 
-        // 排除玩家角色正中心足底區域 (預防自身皮克敏隊伍衣服誤判)
-        val avatarMinX = (scaledW * 0.40f).toInt()
-        val avatarMaxX = (scaledW * 0.60f).toInt()
-        val avatarMinY = (scaledH * 0.52f).toInt()
-        val avatarMaxY = (scaledH * 0.68f).toInt()
+        // 僅排除玩家正中心微小角色圖標 (~14px 半徑)，避免盲區過大吞噬周圍蘑菇
+        val centerPlayerX = scaledW / 2
+        val centerPlayerY = (scaledH * 0.58f).toInt()
+        val playerExclusionRadius = 14
 
         for (y in startY until endY) {
             val rowOffset = y * scaledW
             for (x in 0 until scaledW) {
-                // 排除正中心玩家本體
-                if (x in avatarMinX..avatarMaxX && y in avatarMinY..avatarMaxY) {
+                if (abs(x - centerPlayerX) <= playerExclusionRadius && abs(y - centerPlayerY) <= playerExclusionRadius) {
                     continue
                 }
 
                 val pixel = pixels[rowOffset + x]
                 Color.colorToHSV(pixel, hsv)
 
-                // 排除草地綠色地形 (Hue 70..160)
-                if (hsv[0] in 70f..160f && hsv[1] >= 0.18f) {
-                    continue
-                }
-
-                val type = classifyHsvToTarget(hsv)
-                if (type != null) {
-                    typeMask[rowOffset + x] = type.ordinal + 1
+                val classification = classifyHsvPixel(hsv)
+                if (classification != null) {
+                    val idx = rowOffset + x
+                    familyMask[idx] = classification.first
+                    typeMask[idx] = classification.second.ordinal + 1
                 }
             }
         }
 
-        // 區塊聚類 (連通分量聚合提取整顆蘑菇實體)
+        // 區塊聚類 (以同色彩家族連通分量聚合提取整顆蘑菇實體)
         val detected = mutableListOf<DetectedMushroom>()
         val visited = BooleanArray(scaledW * scaledH)
 
-        // 🌟 最佳化靈敏度門檻：放寬至 18 像素 (支援 80m~350m 遠距蘑菇)，巨大菇 >= 80 像素
+        // 實體大小過濾門檻：寬高不可超過畫面特定比例 (排除河流、整條馬路、大片湖泊)
+        val maxBboxW = (scaledW * 0.35f).toInt()
+        val maxBboxH = (scaledH * 0.18f).toInt()
         val minClusterSize = 18
-        val minGiantClusterSize = 85
-        val maxClusterSize = 25000
+        val maxClusterSize = 2200
 
         val queue = IntArray(maxClusterSize * 2)
 
@@ -148,8 +157,8 @@ object MushroomDetector {
             val rowOffset = y * scaledW
             for (x in 0 until scaledW) {
                 val idx = rowOffset + x
-                val rawTypeVal = typeMask[idx]
-                if (rawTypeVal > 0 && !visited[idx]) {
+                val fam = familyMask[idx]
+                if (fam > 0 && !visited[idx]) {
                     var head = 0
                     var tail = 0
                     queue[tail++] = idx
@@ -184,20 +193,17 @@ object MushroomDetector {
                         if (cy < minY) minY = cy
                         if (cy > maxY) maxY = cy
 
-                        // 8 鄰域泛洪擴散 (防止斑點與光影斷裂)
-                        val n1 = curr - 1
-                        val n2 = curr + 1
-                        val n3 = curr - scaledW
-                        val n4 = curr + scaledW
-                        val n5 = curr - scaledW - 1
-                        val n6 = curr - scaledW + 1
-                        val n7 = curr + scaledW - 1
-                        val n8 = curr + scaledW + 1
+                        // 8 鄰域泛洪擴散：嚴格限制只能在「同一色彩家族」內擴散
+                        val neighbors = intArrayOf(
+                            curr - 1, curr + 1,
+                            curr - scaledW, curr + scaledW,
+                            curr - scaledW - 1, curr - scaledW + 1,
+                            curr + scaledW - 1, curr + scaledW + 1
+                        )
 
-                        val neighbors = intArrayOf(n1, n2, n3, n4, n5, n6, n7, n8)
                         for (n in neighbors) {
                             if (n in 0 until (scaledW * scaledH)) {
-                                if (!visited[n] && typeMask[n] > 0) {
+                                if (!visited[n] && familyMask[n] == fam) {
                                     visited[n] = true
                                     queue[tail++] = n
                                 }
@@ -209,27 +215,32 @@ object MushroomDetector {
                     val bboxH = maxY - minY + 1
                     val aspectRatio = bboxW.toFloat() / bboxH.toFloat()
 
-                    // 尋找此聚類中佔比最高的蘑菇種類 (Dominant Color Voting)
-                    var bestTypeIndex = -1
-                    var maxVotes = 0
-                    for (i in typeHistogram.indices) {
-                        if (typeHistogram[i] > maxVotes) {
-                            maxVotes = typeHistogram[i]
-                            bestTypeIndex = i
-                        }
+                    // 地形特徵過濾：蘑菇不可為超長條馬路或跨越半屏的大河流
+                    if (bboxW > maxBboxW || bboxH > maxBboxH) {
+                        continue
                     }
 
-                    if (bestTypeIndex >= 0) {
-                        val dominantType = MushroomType.entries[bestTypeIndex]
+                    // 幾何形狀過濾：排除細長長條雜訊 (長寬比 0.35 ~ 2.85, 寬度 >= 5px)
+                    if (count in minClusterSize..maxClusterSize && aspectRatio in 0.35f..2.85f && bboxW >= 5) {
+                        // 尋找此聚類中佔比最高的蘑菇種類 (Dominant Color Voting)
+                        var bestTypeIndex = -1
+                        var maxVotes = 0
+                        for (i in typeHistogram.indices) {
+                            if (typeHistogram[i] > maxVotes) {
+                                maxVotes = typeHistogram[i]
+                                bestTypeIndex = i
+                            }
+                        }
 
-                        // 判斷是否為使用者要尋找的目標種類
-                        if (targetTypes.contains(dominantType)) {
-                            // 幾何形狀過濾：排除細長道路與長條雜訊 (長寬比 0.35 ~ 2.80, 寬度 >= 5px)
-                            if (count >= minClusterSize && count <= maxClusterSize && aspectRatio in 0.35f..2.85f && bboxW >= 5) {
+                        if (bestTypeIndex >= 0) {
+                            val dominantType = MushroomType.entries[bestTypeIndex]
+
+                            // 判斷是否為使用者要尋找的目標種類
+                            if (targetTypes.contains(dominantType)) {
                                 val origX = ((sumX / count) / scale).toInt()
                                 val origY = ((sumY / count) / scale).toInt()
                                 val radius = (max(bboxW, bboxH) / (2f * scale)).toInt().coerceAtLeast(18)
-                                val isGiant = count >= minGiantClusterSize || dominantType == MushroomType.GIANT_EVENT
+                                val isGiant = count >= 150 || dominantType.category == MushroomCategory.LARGE_ELEMENT || dominantType == MushroomType.GIANT_EVENT
 
                                 val confidence = min(1.0f, (maxVotes.toFloat() / count.toFloat()) * (count.toFloat() / (minClusterSize * 2f)))
 
@@ -250,10 +261,13 @@ object MushroomDetector {
             }
         }
 
+        // 依聚類半徑/信心度降序排序，使最顯眼的蘑菇排在最前
+        detected.sortByDescending { it.radius * it.confidence }
+
         // 去除重疊之鄰近檢測點 (非極大值抑制 NMS)
         val merged = mutableListOf<DetectedMushroom>()
         for (m in detected) {
-            val duplicate = merged.find { abs(it.x - m.x) < 50 && abs(it.y - m.y) < 50 }
+            val duplicate = merged.find { abs(it.x - m.x) < 45 && abs(it.y - m.y) < 45 }
             if (duplicate == null) {
                 merged.add(m)
             }
@@ -263,52 +277,57 @@ object MushroomDetector {
     }
 
     /**
-     * 精準 HSV 色域分類器：依 Pikmin Bloom 真機截圖動態光影校準
+     * 真機校準色域分類器：結合色彩家族防污染機制
      */
-    private fun classifyHsvToTarget(hsv: FloatArray): MushroomType? {
+    private fun classifyHsvPixel(hsv: FloatArray): Pair<Int, MushroomType>? {
         val h = hsv[0] // 0..360
         val s = hsv[1] // 0..1
         val v = hsv[2] // 0..1
 
+        // 1. 嚴格過濾遊戲草地綠色地形 (Hue 75..140 且飽和度 >= 0.22)
+        if (h in 75f..140f && s >= 0.22f) {
+            return null
+        }
+
         return when {
-            // 🔴 1. 紅色 (大紅菇)
-            ((h in 345f..360f) || (h in 0f..20f)) && s >= 0.28f && v >= 0.24f -> MushroomType.LARGE_RED
+            // 🔥 2. 大火蘑菇 (LARGE_FIRE) - 明烈紅橘火光與燃燒火舌 (高飽和鮮明橘紅)
+            h in 12f..38f && s >= 0.40f && v >= 0.42f -> Pair(FAM_FIRE_RED, MushroomType.LARGE_FIRE)
 
-            // 🔥 2. 火元素菇 (大火菇) - 明烈紅橘火光
-            h in 12f..36f && s >= 0.40f && v >= 0.35f -> MushroomType.LARGE_FIRE
+            // ⚡ 3. 大電蘑菇 (LARGE_ELECTRIC) - 晶亮金黃電弧 (高明度電弧黃)
+            h in 40f..68f && s >= 0.28f && v >= 0.55f -> Pair(FAM_ELECTRIC_YELLOW, MushroomType.LARGE_ELECTRIC)
 
-            // ⚡ 3. 電元素菇 (大電菇) - 高亮金黃電弧
-            h in 42f..68f && s >= 0.32f && v >= 0.58f -> MushroomType.LARGE_ELECTRIC
+            // 🟡 4. 普通大黃菇 (LARGE_YELLOW)
+            h in 38f..65f && s >= 0.28f && v in 0.35f..0.98f -> Pair(FAM_ELECTRIC_YELLOW, MushroomType.LARGE_YELLOW)
 
-            // 🟡 4. 黃色 (大黃菇)
-            h in 38f..65f && s >= 0.28f && v in 0.35f..0.98f -> MushroomType.LARGE_YELLOW
+            // 🔴 5. 普通大紅菇 (LARGE_RED)
+            ((h in 345f..360f) || (h in 0f..18f)) && s >= 0.30f && v >= 0.26f -> Pair(FAM_FIRE_RED, MushroomType.LARGE_RED)
 
-            // 💧 5. 水元素菇 (大水菇) - 湛青流水水花
-            h in 182f..222f && s >= 0.32f && v >= 0.30f -> MushroomType.LARGE_WATER
+            // 🧪 6. 大毒蘑菇 (LARGE_POISON) - 碧青/薄荷綠毒霧霧氣 (Hue 142..185) 或 劇毒紫紅傘蓋 (Hue 265..335)
+            (h in 142f..185f && s >= 0.20f && v >= 0.38f) || (h in 265f..335f && s >= 0.18f && v >= 0.20f) -> Pair(FAM_POISON, MushroomType.LARGE_POISON)
 
-            // 🔵 6. 藍色 (大藍菇)
-            h in 190f..248f && s >= 0.24f && v in 0.20f..0.96f -> MushroomType.LARGE_BLUE
+            // 💧 7. 大水蘑菇 (LARGE_WATER) - 飽滿水潤青藍水滴 (湛藍流水水花)
+            h in 182f..225f && s >= 0.25f && v in 0.32f..0.96f -> Pair(FAM_WATER_BLUE, MushroomType.LARGE_WATER)
 
-            // 🟣 7. 紫色 (大紫菇)
-            h in 255f..305f && s >= 0.22f && v in 0.20f..0.92f -> MushroomType.LARGE_PURPLE
+            // 💎 8. 大水晶蘑菇 (LARGE_CRYSTAL) - 冰透低飽和微藍反光晶面 (高明度極淡透冰藍)
+            h in 175f..235f && s in 0.07f..0.38f && v >= 0.60f -> Pair(FAM_CRYSTAL, MushroomType.LARGE_CRYSTAL)
 
-            // 🧪 8. 毒元素菇 (大毒菇) - 劇毒紫紅或青碧毒霧
-            ((h in 275f..330f && s >= 0.28f) || (h in 150f..182f && s >= 0.30f && v >= 0.40f)) -> MushroomType.LARGE_POISON
+            // 🔵 9. 普通大藍菇 (LARGE_BLUE)
+            h in 195f..250f && s >= 0.25f && v >= 0.22f -> Pair(FAM_WATER_BLUE, MushroomType.LARGE_BLUE)
 
-            // 🌸 9. 粉色 (大粉羽菇)
-            h in 312f..348f && s >= 0.20f && v >= 0.35f -> MushroomType.LARGE_PINK
+            // 👑 10. 巨大活動特殊菇 (GIANT_EVENT)
+            h in 18f..48f && s >= 0.38f && v >= 0.50f -> Pair(FAM_EVENT, MushroomType.GIANT_EVENT)
 
-            // 👑 10. 巨大活動特殊菇 - 絢麗活動金光與特殊漸層
-            h in 18f..48f && s >= 0.38f && v >= 0.50f -> MushroomType.GIANT_EVENT
+            // 🟣 11. 普通大紫菇 (LARGE_PURPLE)
+            h in 255f..305f && s >= 0.22f && v in 0.20f..0.92f -> Pair(FAM_PURPLE_PINK, MushroomType.LARGE_PURPLE)
 
-            // 💎 11. 水晶元素菇 (大水晶菇) - 冰透高明度微藍晶面
-            (h in 175f..225f && s in 0.08f..0.45f && v >= 0.65f) -> MushroomType.LARGE_CRYSTAL
+            // 🌸 12. 普通大粉菇 (LARGE_PINK)
+            h in 312f..348f && s >= 0.20f && v >= 0.35f -> Pair(FAM_PURPLE_PINK, MushroomType.LARGE_PINK)
 
-            // ⚪ 12. 白色 (大白菇) - 純淨白傘 (需具備一定純淨度)
-            s <= 0.18f && v >= 0.74f -> MushroomType.LARGE_WHITE
+            // ⚪ 13. 普通大白菇 (LARGE_WHITE) - 高純度白傘 (避免道路低飽和地皮)
+            s <= 0.15f && v >= 0.85f -> Pair(FAM_WHITE, MushroomType.LARGE_WHITE)
 
-            // 🪨 13. 灰色 (大灰岩菇) - 粗糙深岩石面
-            s <= 0.28f && v in 0.18f..0.62f -> MushroomType.LARGE_GRAY
+            // 🪨 14. 普通大灰菇 (LARGE_GRAY)
+            s <= 0.25f && v in 0.22f..0.60f -> Pair(FAM_GRAY, MushroomType.LARGE_GRAY)
 
             else -> null
         }
