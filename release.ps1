@@ -50,7 +50,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
         $parts[2] = ([int]$parts[2] + 1).ToString()
         $newName = [string]::Join('.', $parts)
     } else {
-        $newName = "$currName.1"
+        $newName = "$($currName).1"
     }
 } else {
     $newName = $Version.TrimStart('v', 'V').Trim()
@@ -64,7 +64,7 @@ Write-Host "📝 更新說明: $Notes" -ForegroundColor Gray
 
 # 3. 更新 app/build.gradle.kts
 $content = [regex]::Replace($content, 'versionCode\s*=\s*\d+', "versionCode = $newCode")
-$content = [regex]::Replace($content, 'versionName\s*=\s*"[^"]+"', "versionName = `"$newName`"")
+$content = [regex]::Replace($content, 'versionName\s*=\s*"[^"]+"', ('versionName = "' + $newName + '"'))
 Set-Content -Path $gradleFile -Value $content -NoNewline
 Write-Host "✅ 已更新 app/build.gradle.kts 版次！" -ForegroundColor Green
 
