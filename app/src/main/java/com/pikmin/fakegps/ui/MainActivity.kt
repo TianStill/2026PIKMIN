@@ -32,6 +32,12 @@ import android.content.Context
 import android.widget.Toast
 import com.pikmin.fakegps.ui.viewmodel.MainViewModel
 import com.pikmin.fakegps.utils.PermissionHelper
+import com.pikmin.fakegps.BuildConfig
+import com.pikmin.fakegps.update.AppUpdateManager
+import com.pikmin.fakegps.update.UpdateUiState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -118,6 +124,12 @@ fun MainScreen(viewModel: MainViewModel) {
     val history by viewModel.history.collectAsState()
 
     val droneStatus by com.pikmin.fakegps.drone.DroneScannerManager.status.collectAsState()
+    val updateState by AppUpdateManager.updateState.collectAsState()
+
+    // 啟動時在背景自動檢查更新
+    LaunchedEffect(Unit) {
+        AppUpdateManager.checkForUpdates(BuildConfig.VERSION_NAME, silentCheck = true)
+    }
 
     var searchQuery by remember { mutableStateOf("") }
     var showFavoritesSheet by remember { mutableStateOf(false) }
@@ -367,6 +379,23 @@ fun MainScreen(viewModel: MainViewModel) {
                                 modifier = Modifier.size(28.dp)
                             )
                         }
+
+                        // 🔄 8. 檢查更新 (線上升級)
+                        IconButton(
+                            onClick = {
+                                CoroutineScope(Dispatchers.Main).launch {
+                                    AppUpdateManager.checkForUpdates(BuildConfig.VERSION_NAME, silentCheck = false)
+                                }
+                            },
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SystemUpdate,
+                                contentDescription = "Check for Updates",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -537,6 +566,14 @@ fun MainScreen(viewModel: MainViewModel) {
                         com.pikmin.fakegps.drone.DroneScannerManager.stopScan()
                     },
                     onDismiss = { showDroneDialog = false }
+                )
+            }
+
+            // 線上更新 Dialog
+            if (updateState !is UpdateUiState.Idle) {
+                UpdateDialog(
+                    updateState = updateState,
+                    onDismiss = { AppUpdateManager.resetState() }
                 )
             }
         }

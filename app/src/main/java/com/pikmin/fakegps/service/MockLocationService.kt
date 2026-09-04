@@ -9,16 +9,21 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.pikmin.fakegps.BuildConfig
 import com.pikmin.fakegps.FakeGpsApplication
 import com.pikmin.fakegps.R
 import com.pikmin.fakegps.data.model.LocationPoint
 import com.pikmin.fakegps.ui.MainActivity
+import com.pikmin.fakegps.update.AppReleaseInfo
+import com.pikmin.fakegps.update.AppUpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MockLocationService : Service() {
 
@@ -28,6 +33,7 @@ class MockLocationService : Service() {
         const val ACTION_UPDATE = "com.pikmin.fakegps.ACTION_UPDATE"
         const val ACTION_ENABLE_MEDIA_PROJECTION = "com.pikmin.fakegps.ACTION_ENABLE_MEDIA_PROJECTION"
         const val ACTION_RESUME_DRONE_SCAN = "com.pikmin.fakegps.ACTION_RESUME_DRONE_SCAN"
+        const val ACTION_INSTALL_UPDATE = "com.pikmin.fakegps.ACTION_INSTALL_UPDATE"
 
         const val EXTRA_LAT = "extra_lat"
         const val EXTRA_LNG = "extra_lng"
@@ -35,6 +41,7 @@ class MockLocationService : Service() {
         const val EXTRA_SPEED = "extra_speed"
 
         private const val NOTIFICATION_ID = 1001
+        private const val UPDATE_NOTIFICATION_ID = 2002
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
@@ -155,6 +162,18 @@ class MockLocationService : Service() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        // 在背景輕量檢查 GitHub 是否有新版本發布
+        scope.launch {
+            try {
+                val release = AppUpdateManager.checkForUpdates(BuildConfig.VERSION_NAME, silentCheck = true)
+                if (release != null) {
+                    showUpdateNotification(release)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -227,6 +246,22 @@ class MockLocationService : Service() {
             ACTION_RESUME_DRONE_SCAN -> {
                 com.pikmin.fakegps.drone.DroneScannerManager.resumeScan(this)
             }
+
+            ACTION_INSTALL_UPDATE -> {
+                val release = AppUpdateManager.latestReleaseInfo
+                if (release != null) {
+                    scope.launch {
+                        showDownloadProgressNotification(0)
+                        val apkFile = AppUpdateManager.downloadApk(this@MockLocationService, release)
+                        if (apkFile != null) {
+                            showInstallReadyNotification(apkFile)
+                            AppUpdateManager.installApk(this@MockLocationService, apkFile)
+                        } else {
+                            clearUpdateNotification()
+                        }
+                    }
+                }
+            }
         }
         return START_STICKY
     }
@@ -282,6 +317,7 @@ class MockLocationService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        clearUpdateNotification()
         clipboardListener?.let {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
             clipboard?.removePrimaryClipChangedListener(it)
@@ -289,6 +325,90 @@ class MockLocationService : Service() {
         engine.stopMocking()
         _isRunning.value = false
         engineInstance = null
+    }
+
+    private fun showUpdateNotification(release: AppReleaseInfo) {
+        try {
+            val installIntent = Intent(this, MockLocationService::class.java).apply {
+                action = ACTION_INSTALL_UPDATE
+            }
+            val pendingIntent = PendingIntent.getService(
+                this,
+                101,
+                installIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, FakeGpsApplication.CHANNEL_ID)
+                .setContentTitle("🔔 發現新版本 ${release.tagName}")
+                .setContentText("點擊直接在遊戲中下載並安裝更新")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .addAction(
+                    android.R.drawable.stat_sys_download,
+                    "立即下載更新",
+                    pendingIntent
+                )
+                .build()
+
+            NotificationManagerCompat.from(this).notify(UPDATE_NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun showDownloadProgressNotification(progress: Int) {
+        try {
+            val notification = NotificationCompat.Builder(this, FakeGpsApplication.CHANNEL_ID)
+                .setContentTitle("正在下載更新檔...")
+                .setContentText("下載進度: $progress%")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setProgress(100, progress, false)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            NotificationManagerCompat.from(this).notify(UPDATE_NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun showInstallReadyNotification(apkFile: File) {
+        try {
+            val installIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                102,
+                installIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, FakeGpsApplication.CHANNEL_ID)
+                .setContentTitle("✅ 更新檔下載完成")
+                .setContentText("點擊開始安裝更新")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+
+            NotificationManagerCompat.from(this).notify(UPDATE_NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun clearUpdateNotification() {
+        try {
+            NotificationManagerCompat.from(this).cancel(UPDATE_NOTIFICATION_ID)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
