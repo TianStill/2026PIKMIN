@@ -306,6 +306,8 @@ object DroneScannerManager {
         scanJob = scope.launch(Dispatchers.Default) {
             val dwellMillis = (dwellSeconds * 1000).toLong().coerceAtLeast(1500L)
 
+            var consecutiveNullFrames = 0
+
             for (index in startIndex until waypoints.size) {
                 if (!isActive) break
 
@@ -330,12 +332,15 @@ object DroneScannerManager {
 
                 val startTime = System.currentTimeMillis()
                 var foundMushroom: DetectedMushroom? = null
+                var capturedFramesAtThisPoint = 0
 
                 // 在停留窗口內，每 350ms 動態取幀辨識一次，一旦 3D 蘑菇自伺服器載入立刻抓取並煞車鎖定！
                 while (System.currentTimeMillis() - startTime < (dwellMillis - 1200L) && isActive) {
                     try {
                         val capturedBitmap = captureCurrentScreen()
                         if (capturedBitmap != null) {
+                            capturedFramesAtThisPoint++
+                            consecutiveNullFrames = 0
                             val detected = MushroomDetector.detectMushrooms(capturedBitmap, targetTypes)
                             if (detected.isNotEmpty()) {
                                 foundMushroom = detected.first()
@@ -346,6 +351,15 @@ object DroneScannerManager {
                         e.printStackTrace()
                     }
                     delay(350L)
+                }
+
+                if (capturedFramesAtThisPoint == 0) {
+                    consecutiveNullFrames++
+                    if (consecutiveNullFrames == 2) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "⚠️ 尚未取得螢幕畫面（可能權限中斷），請確認啟動無人機時有允許「立即開始錄製螢幕」！", Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
 
                 if (!isActive) break

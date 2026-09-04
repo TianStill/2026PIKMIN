@@ -176,6 +176,8 @@ class MockLocationService : Service() {
         }
     }
 
+    private var isMediaProjectionActive = false
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
@@ -200,15 +202,9 @@ class MockLocationService : Service() {
             }
 
             ACTION_ENABLE_MEDIA_PROJECTION -> {
+                isMediaProjectionActive = true
                 val point = _currentLocation.value ?: LocationPoint(0.0, 0.0)
-                val notification = buildNotification(point)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(
-                        NOTIFICATION_ID,
-                        notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                    )
-                }
+                startForegroundWithNotification(point)
             }
 
             ACTION_UPDATE -> {
@@ -237,6 +233,7 @@ class MockLocationService : Service() {
             }
 
             ACTION_STOP -> {
+                isMediaProjectionActive = false
                 engine.stopMocking()
                 _isRunning.value = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -268,7 +265,14 @@ class MockLocationService : Service() {
 
     private fun startForegroundWithNotification(point: LocationPoint) {
         val notification = buildNotification(point)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val type = if (isMediaProjectionActive) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,

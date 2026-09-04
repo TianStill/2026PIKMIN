@@ -143,6 +143,12 @@ object MushroomDetector {
 
         // 區塊聚類 (以同色彩家族連通分量聚合提取整顆蘑菇實體)
         val detected = mutableListOf<DetectedMushroom>()
+
+        // 🌟 引擎 1：Pikmin Bloom 專屬 2D UI 計時圓鐘徽章定位 (Badge Anchor)
+        // 每顆可挑戰蘑菇正上方均懸浮紅扇形圓鐘與人數標籤，不受草地、河流、道路等地形雜訊干擾
+        val badgeMushrooms = detectBadgeAnchoredMushrooms(pixels, scaledW, scaledH, scale, targetTypes)
+        detected.addAll(badgeMushrooms)
+
         val visited = BooleanArray(scaledW * scaledH)
 
         // 實體大小過濾門檻：寬高不可超過畫面特定比例 (排除河流、整條馬路、大片湖泊)
@@ -331,6 +337,159 @@ object MushroomDetector {
 
             else -> null
         }
+    }
+
+    /**
+     * 👑 引擎 1：Pikmin Bloom 專屬 2D UI 計時圓鐘徽章定位核心 (Badge Anchor)
+     * 在遊戲畫面中，每顆可挑戰的蘑菇正上方均懸浮一枚「紅扇形計時圓鐘 (⏰) + 人數標籤」
+     * 徽章為純 2D UI 貼圖，不受光照、草皮、河流與地形雜訊影響，精準度極高！
+     */
+    private fun detectBadgeAnchoredMushrooms(
+        pixels: IntArray,
+        scaledW: Int,
+        scaledH: Int,
+        scale: Float,
+        targetTypes: Set<MushroomType>
+    ): List<DetectedMushroom> {
+        val detected = mutableListOf<DetectedMushroom>()
+        val startY = (scaledH * 0.10f).toInt()
+        val endY = (scaledH * 0.90f).toInt()
+
+        val redMask = BooleanArray(scaledW * scaledH)
+        val hsv = FloatArray(3)
+
+        // 1. 標記計時圓鐘上的高對比亮紅扇形像素
+        for (y in startY until endY) {
+            val offset = y * scaledW
+            for (x in 0 until scaledW) {
+                val c = pixels[offset + x]
+                val r = (c shr 16) and 0xFF
+                val g = (c shr 8) and 0xFF
+                val b = c and 0xFF
+
+                if (r > 165 && g < 115 && b < 115 && (r - max(g, b) > 50)) {
+                    redMask[offset + x] = true
+                }
+            }
+        }
+
+        // 2. 聚類扇形紅標
+        val visited = BooleanArray(scaledW * scaledH)
+        val queue = IntArray(1000)
+
+        for (y in startY until endY) {
+            val offset = y * scaledW
+            for (x in 0 until scaledW) {
+                val idx = offset + x
+                if (redMask[idx] && !visited[idx]) {
+                    var head = 0
+                    var tail = 0
+                    queue[tail++] = idx
+                    visited[idx] = true
+
+                    var sumX = 0L
+                    var sumY = 0L
+                    var count = 0
+
+                    while (head < tail && tail < queue.size - 4) {
+                        val curr = queue[head++]
+                        val cx = curr % scaledW
+                        val cy = curr / scaledW
+                        sumX += cx
+                        sumY += cy
+                        count++
+
+                        val neighbors = intArrayOf(curr - 1, curr + 1, curr - scaledW, curr + scaledW)
+                        for (n in neighbors) {
+                            if (n in 0 until (scaledW * scaledH) && !visited[n] && redMask[n]) {
+                                visited[n] = true
+                                queue[tail++] = n
+                            }
+                        }
+                    }
+
+                    // 扇形紅標尺寸限制 (直徑約 3..14px)
+                    if (count in 4..140) {
+                        val bx = (sumX / count).toInt()
+                        val by = (sumY / count).toInt()
+
+                        // 驗證周遭是否有白色圓鐘鐘面底色 (8px 範圍內)
+                        var hasWhiteCircle = false
+                        for (dy in -8..8) {
+                            for (dx in -8..8) {
+                                val wx = bx + dx
+                                val wy = by + dy
+                                if (wx in 0 until scaledW && wy in 0 until scaledH) {
+                                    val wc = pixels[wy * scaledW + wx]
+                                    val wr = (wc shr 16) and 0xFF
+                                    val wg = (wc shr 8) and 0xFF
+                                    val wb = wc and 0xFF
+                                    if (wr > 210 && wg > 210 && wb > 210) {
+                                        hasWhiteCircle = true
+                                        break
+                                    }
+                                }
+                            }
+                            if (hasWhiteCircle) break
+                        }
+
+                        if (hasWhiteCircle) {
+                            // 3. 採樣圓鐘正下方實體 (Y + 8px 至 Y + 45px，寬 ±22px)
+                            val bodyY1 = min(scaledH - 1, by + 8)
+                            val bodyY2 = min(scaledH - 1, by + 45)
+                            val bodyX1 = max(0, bx - 22)
+                            val bodyX2 = min(scaledW - 1, bx + 22)
+
+                            val typeVotes = IntArray(MushroomType.entries.size)
+                            var validPixels = 0
+
+                            for (sy in bodyY1..bodyY2) {
+                                val sOffset = sy * scaledW
+                                for (sx in bodyX1..bodyX2) {
+                                    val sc = pixels[sOffset + sx]
+                                    Color.colorToHSV(sc, hsv)
+                                    val classification = classifyHsvPixel(hsv)
+                                    if (classification != null) {
+                                        typeVotes[classification.second.ordinal]++
+                                        validPixels++
+                                    }
+                                }
+                            }
+
+                            if (validPixels >= 8) {
+                                var bestIndex = -1
+                                var maxV = 0
+                                for (i in typeVotes.indices) {
+                                    if (typeVotes[i] > maxV) {
+                                        maxV = typeVotes[i]
+                                        bestIndex = i
+                                    }
+                                }
+
+                                if (bestIndex >= 0) {
+                                    val targetType = MushroomType.entries[bestIndex]
+                                    if (targetTypes.contains(targetType)) {
+                                        val origX = (bx / scale).toInt()
+                                        val origY = ((by + 24) / scale).toInt()
+                                        detected.add(
+                                            DetectedMushroom(
+                                                type = targetType,
+                                                x = origX,
+                                                y = origY,
+                                                radius = (32 / scale).toInt().coerceAtLeast(24),
+                                                confidence = 0.96f,
+                                                isGiant = validPixels >= 60 || targetType.category == MushroomCategory.LARGE_ELEMENT
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return detected
     }
 
     /**
