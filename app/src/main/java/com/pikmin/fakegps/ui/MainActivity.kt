@@ -215,23 +215,56 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
             )
 
-            // 2. 頂部搜尋欄
-            LocationSearchBar(
-                query = searchQuery,
-                onQueryChange = { searchQuery = it },
-                onSearch = { viewModel.searchLocation(it) },
-                searchResults = searchResults,
-                isSearching = isSearching,
-                onResultSelected = { result ->
-                    viewModel.setTargetLocation(result.latitude, result.longitude)
-                    viewModel.clearSearchResults()
-                    searchQuery = result.displayName.split(",").firstOrNull() ?: ""
-                },
-                onClearResults = { viewModel.clearSearchResults() },
+            // 2. 頂部搜尋欄與單獨右上角檢查版本按鈕
+            Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-            )
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                LocationSearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    onSearch = { viewModel.searchLocation(it) },
+                    searchResults = searchResults,
+                    isSearching = isSearching,
+                    onResultSelected = { result ->
+                        viewModel.setTargetLocation(result.latitude, result.longitude)
+                        viewModel.clearSearchResults()
+                        searchQuery = result.displayName.split(",").firstOrNull() ?: ""
+                    },
+                    onClearResults = { viewModel.clearSearchResults() },
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // 🔄 單獨右上角檢查版本按鈕 (圓形卡片懸浮按鈕)
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                    shadowElevation = 6.dp,
+                    tonalElevation = 3.dp,
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            CoroutineScope(Dispatchers.Main).launch {
+                                AppUpdateManager.checkForUpdates(BuildConfig.VERSION_NAME, silentCheck = false)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = "Check for Updates",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+            }
 
             // 3. 右側功能工具欄 (直放靠齊右下方，加大圖示方便大拇指單手按取)
             Column(
@@ -376,23 +409,6 @@ fun MainScreen(viewModel: MainViewModel) {
                                 imageVector = Icons.Default.Radar,
                                 contentDescription = "Drone Radar",
                                 tint = if (droneStatus.isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-
-                        // 🔄 8. 檢查更新 (線上升級)
-                        IconButton(
-                            onClick = {
-                                CoroutineScope(Dispatchers.Main).launch {
-                                    AppUpdateManager.checkForUpdates(BuildConfig.VERSION_NAME, silentCheck = false)
-                                }
-                            },
-                            modifier = Modifier.size(52.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SystemUpdate,
-                                contentDescription = "Check for Updates",
-                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
