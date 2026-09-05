@@ -31,6 +31,7 @@ import com.pikmin.fakegps.cv.DetectedMushroom
 import com.pikmin.fakegps.cv.MushroomCategory
 import com.pikmin.fakegps.cv.MushroomDetector
 import com.pikmin.fakegps.cv.MushroomType
+import com.pikmin.fakegps.drone.DroneCruiseProfile
 import com.pikmin.fakegps.drone.DroneScannerManager
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,9 +49,9 @@ fun DroneScannerDialog(
 
     var selectedRadiusKm by remember { mutableStateOf(1.5) }
     var selectedTypes by remember { mutableStateOf(MushroomType.ALL_TARGETS) }
-    var speedMode by remember { mutableStateOf(1) } // 0: 極速 (380m / 1.8s), 1: 推薦 (360m / 2.2s), 2: 精細 (250m / 2.8s)
-    var dwellSeconds by remember { mutableStateOf(2.2f) }
-    var stepMeters by remember { mutableStateOf(360.0) }
+    var speedMode by remember { mutableStateOf(DroneCruiseProfile.STANDARD.modeId) }
+    var dwellSeconds by remember { mutableStateOf(DroneCruiseProfile.STANDARD.dwellSeconds) }
+    var stepMeters by remember { mutableStateOf(DroneCruiseProfile.STANDARD.stepMeters) }
 
     // 相片辨識測試狀態
     var testBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -383,24 +384,17 @@ fun DroneScannerDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf(
-                            Triple(0, "⚡ 極速模式", "380m / 1.8s"),
-                            Triple(1, "🚀 推薦標準", "360m / 2.2s"),
-                            Triple(2, "🎯 精細搜尋", "250m / 2.8s")
-                        ).forEach { (mode, title, subtitle) ->
-                            val isSelected = speedMode == mode
+                        DroneCruiseProfile.ALL.forEach { profile ->
+                            val isSelected = speedMode == profile.modeId
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                                 modifier = Modifier
                                     .weight(1f)
                                     .clickable {
-                                        speedMode = mode
-                                        when (mode) {
-                                            0 -> { stepMeters = 380.0; dwellSeconds = 1.8f }
-                                            1 -> { stepMeters = 360.0; dwellSeconds = 2.2f }
-                                            2 -> { stepMeters = 250.0; dwellSeconds = 2.8f }
-                                        }
+                                        speedMode = profile.modeId
+                                        stepMeters = profile.stepMeters
+                                        dwellSeconds = profile.dwellSeconds
                                     }
                             ) {
                                 Column(
@@ -408,7 +402,7 @@ fun DroneScannerDialog(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = title,
+                                        text = profile.title,
                                         style = MaterialTheme.typography.labelMedium,
                                         color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontWeight = FontWeight.Bold,
@@ -416,10 +410,10 @@ fun DroneScannerDialog(
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = subtitle,
+                                        text = profile.subtitle,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f) else MaterialTheme.colorScheme.outline,
-                                        fontSize = 9.5.sp
+                                        fontSize = 10.5.sp
                                     )
                                 }
                             }

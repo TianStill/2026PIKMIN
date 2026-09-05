@@ -61,6 +61,27 @@ data class DiscoveredMushroomRecord(
 )
 
 /**
+ * 無人機巡航速度與精度預設配置 (統一資料模型，解決 Shotgun Surgery 代碼氣味)
+ */
+data class DroneCruiseProfile(
+    val modeId: Int,
+    val title: String,
+    val subtitle: String,
+    val stepMeters: Double,
+    val dwellSeconds: Float
+) {
+    companion object {
+        val FAST = DroneCruiseProfile(0, "⚡ 快速巡航", "350m / 2.2s", 350.0, 2.2f)
+        val STANDARD = DroneCruiseProfile(1, "🚀 推薦標準", "300m / 2.8s", 300.0, 2.8f)
+        val PRECISE = DroneCruiseProfile(2, "🎯 精細搜尋", "240m / 3.5s", 240.0, 3.5f)
+
+        val ALL = listOf(FAST, STANDARD, PRECISE)
+
+        fun getById(id: Int): DroneCruiseProfile = ALL.find { it.modeId == id } ?: STANDARD
+    }
+}
+
+/**
  * 無人機雷達巡航與截圖檢測管理器
  */
 object DroneScannerManager {
@@ -252,7 +273,7 @@ object DroneScannerManager {
 
     private var currentWaypoints: List<LocationPoint> = emptyList()
     private var currentTargetTypes: Set<MushroomType> = emptySet()
-    private var currentDwellSeconds: Float = 2.2f
+    private var currentDwellSeconds: Float = 2.8f
     private var currentStartIndex: Int = 0
 
     // 當次巡檢已記錄之蘑菇庫 (避免相鄰航點看見同一顆菇時重複跳出警報)
@@ -267,8 +288,8 @@ object DroneScannerManager {
         centerLng: Double,
         radiusKm: Double,
         targetTypes: Set<MushroomType>,
-        dwellSeconds: Float = 2.2f,
-        stepMeters: Double = 360.0
+        dwellSeconds: Float = 2.8f,
+        stepMeters: Double = 300.0
     ) {
         synchronized(foundMushroomsThisSession) {
             foundMushroomsThisSession.clear()
@@ -397,7 +418,7 @@ object DroneScannerManager {
 
         scanJob = scope.launch(Dispatchers.Default) {
             val dwellMillis = (dwellSeconds * 1000).toLong().coerceAtLeast(1400L)
-            val initialDelay = if (dwellMillis <= 2000L) 850L else 1100L
+            val initialDelay = if (dwellMillis <= 2200L) 900L else 1200L
 
             var consecutiveNullFrames = 0
 
@@ -519,7 +540,10 @@ object DroneScannerManager {
             statusMessage = "🎯 成功發現【$label】！已自動鎖定座標！"
         )
 
-        // 加入歷史定位紀錄
+        // 🌟 核心修復：立即將 Mock GPS 定位精確鎖定至蘑菇估算座標，並更新最後定位與歷史紀錄
+        prefs.lastLatitude = location.latitude
+        prefs.lastLongitude = location.longitude
+        MockLocationService.updateLocation(context, location)
         prefs.addHistory(location.latitude, location.longitude, "🎯 發現 $label")
 
         // 1. 手機多段強震動提示
