@@ -241,7 +241,7 @@ fun DroneScannerDialog(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.clickable {
                                     selectedTypes = if (selectedTypes.size == MushroomType.ALL_TARGETS.size) {
-                                        setOf(MushroomType.GIANT_EVENT)
+                                        setOf(MushroomType.LARGE_ELECTRIC)
                                     } else {
                                         MushroomType.ALL_TARGETS
                                     }
@@ -252,47 +252,7 @@ fun DroneScannerDialog(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // 👑 類別 1: 巨大活動特殊菇
-                    Text("👑 活動限定", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    val isEventSelected = selectedTypes.contains(MushroomType.GIANT_EVENT)
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isEventSelected) Color(0xFFF59E0B).copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = if (isEventSelected) androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFF59E0B)) else null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                selectedTypes = if (isEventSelected) {
-                                    if (selectedTypes.size > 1) selectedTypes - MushroomType.GIANT_EVENT else selectedTypes
-                                } else {
-                                    selectedTypes + MushroomType.GIANT_EVENT
-                                }
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = if (isEventSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                contentDescription = null,
-                                tint = if (isEventSelected) Color(0xFFF59E0B) else MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "巨大活動特殊菇 (萬聖節/神秘/派對等限定巨大菇)",
-                                fontSize = 13.sp,
-                                fontWeight = if (isEventSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // ⚡ 類別 2: 大元素菇 (火、水、電、水晶、毒)
+                    // ⚡ 類別 1: 大元素菇 (電、火、水、水晶、毒)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -355,7 +315,7 @@ fun DroneScannerDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 🌈 類別 3: 大顏色菇 (紅、黃、藍、紫、白、粉、灰)
+                    // 🌈 類別 2: 大顏色菇 (紅、黃、藍、紫、白、粉、灰)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
