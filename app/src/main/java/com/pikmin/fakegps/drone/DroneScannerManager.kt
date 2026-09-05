@@ -79,13 +79,7 @@ object DroneScannerManager {
     private var latestBitmap: Bitmap? = null
     private val bitmapLock = Any()
 
-    // 🌟 可重複利用的 Bitmap 與緩衝區，徹底消除每幀 createBitmap 導致的記憶體抖動與頻繁 GC
-    private var reusableBufferBitmap: Bitmap? = null
-    private var reusableCleanBitmap: Bitmap? = null
-    private var reusableDirectBuffer: java.nio.ByteBuffer? = null
-    private var reusableCanvas: Canvas? = null
-    private val reusableSrcRect = Rect()
-    private val reusableDstRect = Rect()
+    private var lastFrameTime = 0L
 
     private var screenWidth = 720
     private var screenHeight = 1280
@@ -146,6 +140,14 @@ object DroneScannerManager {
             imageReader?.setOnImageAvailableListener({ reader ->
                 try {
                     val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                    val now = System.currentTimeMillis()
+                    // 限制取幀頻率 (~150ms 一幀，約 6.6 FPS)，既滿足 250ms 採樣需求，又徹底避免 60FPS 頻繁記憶體配置
+                    if (now - lastFrameTime < 150L) {
+                        image.close()
+                        return@setOnImageAvailableListener
+                    }
+                    lastFrameTime = now
+
                     val planes = image.planes
                     val buffer = planes[0].buffer
                     val pixelStride = planes[0].pixelStride
@@ -155,55 +157,36 @@ object DroneScannerManager {
                     val width = screenWidth + rowPadding / pixelStride
                     val height = screenHeight
 
-                    synchronized(bitmapLock) {
-                        if (reusableBufferBitmap == null ||
-                            reusableBufferBitmap?.width != width ||
-                            reusableBufferBitmap?.height != height ||
-                            reusableBufferBitmap?.isRecycled == true
-                        ) {
-                            reusableBufferBitmap?.recycle()
-                            reusableBufferBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                        }
+                    val tempBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    val requiredCapacity = tempBitmap.byteCount
+                    val remaining = buffer.remaining()
 
-                        val targetBitmap = reusableBufferBitmap ?: return@synchronized
-                        val requiredCapacity = targetBitmap.byteCount
-                        val remaining = buffer.remaining()
-
-                        if (remaining >= requiredCapacity) {
-                            buffer.position(0)
-                            targetBitmap.copyPixelsFromBuffer(buffer)
-                        } else {
-                            // 解決 Android 系統底層 ImageReader 最後一行 padding 缺失 bug
-                            if (reusableDirectBuffer == null || reusableDirectBuffer?.capacity() != requiredCapacity) {
-                                reusableDirectBuffer = java.nio.ByteBuffer.allocateDirect(requiredCapacity)
-                            }
-                            reusableDirectBuffer?.clear()
-                            buffer.position(0)
-                            reusableDirectBuffer?.put(buffer)
-                            reusableDirectBuffer?.position(0)
-                            targetBitmap.copyPixelsFromBuffer(reusableDirectBuffer!!)
-                        }
-
-                        if (rowPadding == 0) {
-                            latestBitmap = targetBitmap
-                        } else {
-                            if (reusableCleanBitmap == null ||
-                                reusableCleanBitmap?.width != screenWidth ||
-                                reusableCleanBitmap?.height != screenHeight ||
-                                reusableCleanBitmap?.isRecycled == true
-                            ) {
-                                reusableCleanBitmap?.recycle()
-                                val newClean = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
-                                reusableCleanBitmap = newClean
-                                reusableCanvas = Canvas(newClean)
-                                reusableSrcRect.set(0, 0, screenWidth, screenHeight)
-                                reusableDstRect.set(0, 0, screenWidth, screenHeight)
-                            }
-                            reusableCanvas?.drawBitmap(targetBitmap, reusableSrcRect, reusableDstRect, null)
-                            latestBitmap = reusableCleanBitmap
-                        }
+                    if (remaining >= requiredCapacity) {
+                        buffer.position(0)
+                        tempBitmap.copyPixelsFromBuffer(buffer)
+                    } else {
+                        // 解決 Android 系統底層 ImageReader 最後一行 padding 缺失 bug
+                        val safeBuffer = java.nio.ByteBuffer.allocateDirect(requiredCapacity)
+                        buffer.position(0)
+                        safeBuffer.put(buffer)
+                        safeBuffer.position(0)
+                        tempBitmap.copyPixelsFromBuffer(safeBuffer)
                     }
                     image.close()
+
+                    // 🌟 必須使用原生的像素裁剪（保留原始 RGB 色彩，防止 Canvas.drawBitmap 因遊戲畫面 Alpha=0 被透明化抹除）
+                    val cleanBitmap = if (rowPadding == 0) {
+                        tempBitmap
+                    } else {
+                        val cropped = Bitmap.createBitmap(tempBitmap, 0, 0, screenWidth, screenHeight)
+                        tempBitmap.recycle()
+                        cropped
+                    }
+
+                    synchronized(bitmapLock) {
+                        latestBitmap?.recycle()
+                        latestBitmap = cleanBitmap
+                    }
                 } catch (e: Throwable) {
                     android.util.Log.e("DroneScanner", "Frame acquisition error: ${e.message}", e)
                 }
@@ -232,13 +215,8 @@ object DroneScannerManager {
         backgroundThread?.quitSafely()
         backgroundThread = null
         synchronized(bitmapLock) {
+            latestBitmap?.recycle()
             latestBitmap = null
-            reusableBufferBitmap?.recycle()
-            reusableBufferBitmap = null
-            reusableCleanBitmap?.recycle()
-            reusableCleanBitmap = null
-            reusableDirectBuffer = null
-            reusableCanvas = null
         }
     }
 
