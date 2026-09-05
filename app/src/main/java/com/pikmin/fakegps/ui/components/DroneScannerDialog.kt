@@ -482,9 +482,30 @@ fun DroneScannerDialog(
                     )
                 }
 
+                // 5. 正北朝向提示卡片
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "🧭", fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "貼心提醒：啟動巡航前，請先點擊遊戲畫面中的「指南針」圖示將地圖回正為正北，以確保發現目標時換算之經緯度座標最為精確！",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
                 HorizontalDivider()
 
-                // 5. 圖片辨識測試工具
+                // 6. 圖片辨識測試工具
                 OutlinedButton(
                     onClick = { photoPickerLauncher.launch("image/*") },
                     modifier = Modifier.fillMaxWidth(),

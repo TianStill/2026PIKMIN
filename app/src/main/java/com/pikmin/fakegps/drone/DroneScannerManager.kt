@@ -4,7 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -77,6 +79,14 @@ object DroneScannerManager {
     private var latestBitmap: Bitmap? = null
     private val bitmapLock = Any()
 
+    // 🌟 可重複利用的 Bitmap 與緩衝區，徹底消除每幀 createBitmap 導致的記憶體抖動與頻繁 GC
+    private var reusableBufferBitmap: Bitmap? = null
+    private var reusableCleanBitmap: Bitmap? = null
+    private var reusableDirectBuffer: java.nio.ByteBuffer? = null
+    private var reusableCanvas: Canvas? = null
+    private val reusableSrcRect = Rect()
+    private val reusableDstRect = Rect()
+
     private var screenWidth = 720
     private var screenHeight = 1280
     private var screenDensity = 320
@@ -145,35 +155,55 @@ object DroneScannerManager {
                     val width = screenWidth + rowPadding / pixelStride
                     val height = screenHeight
 
-                    val tempBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    val requiredCapacity = tempBitmap.byteCount
-                    val remaining = buffer.remaining()
+                    synchronized(bitmapLock) {
+                        if (reusableBufferBitmap == null ||
+                            reusableBufferBitmap?.width != width ||
+                            reusableBufferBitmap?.height != height ||
+                            reusableBufferBitmap?.isRecycled == true
+                        ) {
+                            reusableBufferBitmap?.recycle()
+                            reusableBufferBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        }
 
-                    if (remaining >= requiredCapacity) {
-                        buffer.position(0)
-                        tempBitmap.copyPixelsFromBuffer(buffer)
-                    } else {
-                        // 解決 Android 系統底層 ImageReader 最後一行 padding 缺失 bug
-                        val safeBuffer = java.nio.ByteBuffer.allocateDirect(requiredCapacity)
-                        buffer.position(0)
-                        safeBuffer.put(buffer)
-                        safeBuffer.position(0)
-                        tempBitmap.copyPixelsFromBuffer(safeBuffer)
+                        val targetBitmap = reusableBufferBitmap ?: return@synchronized
+                        val requiredCapacity = targetBitmap.byteCount
+                        val remaining = buffer.remaining()
+
+                        if (remaining >= requiredCapacity) {
+                            buffer.position(0)
+                            targetBitmap.copyPixelsFromBuffer(buffer)
+                        } else {
+                            // 解決 Android 系統底層 ImageReader 最後一行 padding 缺失 bug
+                            if (reusableDirectBuffer == null || reusableDirectBuffer?.capacity() != requiredCapacity) {
+                                reusableDirectBuffer = java.nio.ByteBuffer.allocateDirect(requiredCapacity)
+                            }
+                            reusableDirectBuffer?.clear()
+                            buffer.position(0)
+                            reusableDirectBuffer?.put(buffer)
+                            reusableDirectBuffer?.position(0)
+                            targetBitmap.copyPixelsFromBuffer(reusableDirectBuffer!!)
+                        }
+
+                        if (rowPadding == 0) {
+                            latestBitmap = targetBitmap
+                        } else {
+                            if (reusableCleanBitmap == null ||
+                                reusableCleanBitmap?.width != screenWidth ||
+                                reusableCleanBitmap?.height != screenHeight ||
+                                reusableCleanBitmap?.isRecycled == true
+                            ) {
+                                reusableCleanBitmap?.recycle()
+                                val newClean = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
+                                reusableCleanBitmap = newClean
+                                reusableCanvas = Canvas(newClean)
+                                reusableSrcRect.set(0, 0, screenWidth, screenHeight)
+                                reusableDstRect.set(0, 0, screenWidth, screenHeight)
+                            }
+                            reusableCanvas?.drawBitmap(targetBitmap, reusableSrcRect, reusableDstRect, null)
+                            latestBitmap = reusableCleanBitmap
+                        }
                     }
                     image.close()
-
-                    val cleanBitmap = if (rowPadding == 0) {
-                        tempBitmap
-                    } else {
-                        val cropped = Bitmap.createBitmap(tempBitmap, 0, 0, screenWidth, screenHeight)
-                        tempBitmap.recycle()
-                        cropped
-                    }
-
-                    synchronized(bitmapLock) {
-                        latestBitmap?.recycle()
-                        latestBitmap = cleanBitmap
-                    }
                 } catch (e: Throwable) {
                     android.util.Log.e("DroneScanner", "Frame acquisition error: ${e.message}", e)
                 }
@@ -201,6 +231,15 @@ object DroneScannerManager {
         imageReader = null
         backgroundThread?.quitSafely()
         backgroundThread = null
+        synchronized(bitmapLock) {
+            latestBitmap = null
+            reusableBufferBitmap?.recycle()
+            reusableBufferBitmap = null
+            reusableCleanBitmap?.recycle()
+            reusableCleanBitmap = null
+            reusableDirectBuffer = null
+            reusableCanvas = null
+        }
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -269,6 +308,12 @@ object DroneScannerManager {
         currentDwellSeconds = dwellSeconds
         currentStartIndex = 0
 
+        Toast.makeText(
+            context,
+            "🛸 無人機出發！請確認遊戲地圖已點擊「指南針」回正正北！",
+            Toast.LENGTH_SHORT
+        ).show()
+
         startScanInternal(context, waypoints, 0, targetTypes, dwellSeconds)
     }
 
@@ -277,6 +322,7 @@ object DroneScannerManager {
      */
     fun resumeScan(context: Context) {
         if (currentWaypoints.isEmpty() || currentStartIndex >= currentWaypoints.size) {
+            currentStartIndex = 0
             Toast.makeText(context, "已無剩餘巡弋點，請開啟面板重新設定半徑！", Toast.LENGTH_SHORT).show()
             return
         }
@@ -457,6 +503,7 @@ object DroneScannerManager {
 
             withContext(Dispatchers.Main) {
                 if (_status.value.foundTarget == null) {
+                    currentStartIndex = 0 // 巡弋結束重置起點
                     _status.value = _status.value.copy(
                         isScanning = false,
                         statusMessage = "✅ 本輪網格巡弋完畢，已無更多目標"
@@ -470,6 +517,7 @@ object DroneScannerManager {
     private fun captureCurrentScreen(): Bitmap? {
         synchronized(bitmapLock) {
             val current = latestBitmap ?: return null
+            if (current.isRecycled) return null
             return try {
                 current.copy(Bitmap.Config.ARGB_8888, false)
             } catch (e: Throwable) {
