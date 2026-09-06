@@ -15,9 +15,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import com.pikmin.fakegps.R
 import com.pikmin.fakegps.data.model.LocationHistoryPoint
 import com.pikmin.fakegps.data.model.LocationPoint
@@ -43,7 +46,11 @@ fun MapViewContainer(
     isMocking: Boolean = false
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    // Some OEM builds do not provide lifecycle-runtime-compose's CompositionLocal
+    // during the first subcomposition. The Android view tree is the authoritative
+    // source used by ComponentActivity and remains available in that case.
+    val lifecycleOwner = LocalView.current.findViewTreeLifecycleOwner()
+        ?: context as? LifecycleOwner
     val centerChanged by rememberUpdatedState(onMapCenterChanged)
     val zoomChanged by rememberUpdatedState(onZoomChanged)
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
@@ -69,6 +76,7 @@ fun MapViewContainer(
     // 當歷史紀錄清單變更時，在地圖上繪製經典紅色水滴定位 Pin 標記
     LaunchedEffect(historyList, mapViewInstance) {
         mapViewInstance?.let { map ->
+            if (mapViewInstance !== map) return@let
             // 移除舊的歷史標記
             historyMarkers.forEach { map.overlays.remove(it) }
 
@@ -121,11 +129,10 @@ fun MapViewContainer(
                 else -> Unit
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
+        lifecycleOwner?.lifecycle?.addObserver(observer)
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+            lifecycleOwner?.lifecycle?.removeObserver(observer)
             map?.onPause()
-            map?.onDetach()
         }
     }
 
@@ -174,7 +181,12 @@ fun MapViewContainer(
                     mapViewInstance = this
                 }
             },
-            update = { _ -> }
+            update = { _ -> },
+            onRelease = { map ->
+                if (mapViewInstance === map) mapViewInstance = null
+                map.onPause()
+                map.onDetach()
+            }
         )
 
         // 地圖正中央準心圖示 (代表當前選取的目標座標)
