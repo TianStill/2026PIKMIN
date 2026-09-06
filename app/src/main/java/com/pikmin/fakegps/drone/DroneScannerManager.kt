@@ -82,6 +82,8 @@ object DroneScannerManager {
 
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var scanJob: Job? = null
+    private val analysisTrace = java.util.ArrayDeque<String>()
+    fun diagnosticSummary(): String = "${_status.value}\n" + analysisTrace.joinToString("\n")
 
     private val _status = MutableStateFlow(DroneScanStatus())
     val status: StateFlow<DroneScanStatus> = _status.asStateFlow()
@@ -259,15 +261,14 @@ object DroneScannerManager {
                 val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
                 @Suppress("DEPRECATION")
                 wakeLock = pm.newWakeLock(
-                    PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
                     "FakeGps:DroneScanWakeLock"
-                )
+                ).apply { setReferenceCounted(false) }
             }
-            if (wakeLock?.isHeld == false) {
-                wakeLock?.acquire(30 * 60 * 1000L) // 最長保持 30 分鐘，防呆避免忘記關閉耗電
-            }
+            // Renew a bounded lease while scanning, including when the game is foreground.
+            wakeLock?.acquire(120_000L)
         } catch (e: Exception) {
-            e.printStackTrace()
+            throw IllegalStateException("無法保持螢幕亮起，請檢查省電設定", e)
         }
     }
 
@@ -378,18 +379,35 @@ object DroneScannerManager {
         val appContext = context.applicationContext
         val prefs = PreferencesRepo(appContext)
         val captureToken = captureGeneration
-        acquireWakeLock(appContext)
+        analysisTrace.clear()
         _status.value = DroneScanStatus(phase = ScanPhase.WAITING_FOR_FRAME, isScanning = true,
             totalPoints = waypoints.size, currentIndex = startIndex,
             statusMessage = "請切換至遊戲地圖，3 秒後開始；請保持正北與固定縮放")
+        openPikminBloom(context)
         scanJob = scope.launch {
+            var wakeRenewal: Job? = null
             try {
+                acquireWakeLock(appContext)
+                wakeRenewal = launch {
+                    while (isActive) {
+                        delay(60_000L)
+                        try { acquireWakeLock(appContext) }
+                        catch (e: Exception) { fail(e.localizedMessage ?: "螢幕保亮失敗"); break }
+                    }
+                }
                 delay(3000)
                 val readyAfter = SystemClock.elapsedRealtime()
                 withTimeout(5000) {
                     while (true) {
                         val frame = captureCurrentScreen(readyAfter)
-                        if (frame != null) { frame.bitmap.recycle(); break }
+                        if (frame != null) {
+                            val blank = frame.isBlank
+                            frame.bitmap.recycle()
+                            check(!blank) {
+                                "裝置將遊戲畫面保護為黑色；請在開發人員選項暫時開啟「停用螢幕分享保護」後重新授權"
+                            }
+                            break
+                        }
                         delay(100)
                     }
                 }
@@ -405,18 +423,37 @@ object DroneScannerManager {
                     val deadline = minimumFrameTime + (dwellSeconds * 1000).toLong().coerceAtLeast(1400)
                     var lastAnalysed = minimumFrameTime
                     var analysedFrames = 0
+                    var blankFrames = 0
                     val confirmation = FrameConfirmation()
                     var found: DetectedMushroom? = null
-                    while (SystemClock.elapsedRealtime() < deadline) {
+                    // A candidate arriving near the deadline gets time for three-frame confirmation.
+                    // The extension is bounded so unrelated flickering colors cannot stall a route.
+                    while (SystemClock.elapsedRealtime() < deadline ||
+                        ((confirmation.hasPendingCandidate || analysedFrames < 3) &&
+                            SystemClock.elapsedRealtime() < deadline + 3000L)) {
                         ensureActive()
                         val frame = captureCurrentScreen(lastAnalysed)
                         if (frame != null) {
                             lastAnalysed = frame.time
+                            if (frame.isBlank) {
+                                frame.bitmap.recycle()
+                                blankFrames++
+                                check(blankFrames < 3) {
+                                    "裝置將遊戲畫面保護為黑色；請在開發人員選項暫時開啟「停用螢幕分享保護」後重新授權"
+                                }
+                                delay(250)
+                                continue
+                            }
+                            blankFrames = 0
                             val detected = try {
                                 withContext(Dispatchers.Default) { MushroomDetector.detectMushrooms(frame.bitmap, targetTypes) }
                             } finally { frame.bitmap.recycle() }
                             analysedFrames++
                             found = confirmation.observe(frame.time, detected)
+                            val trace = "waypoint=${index + 1} frames=$analysedFrames candidates=${detected.map { it.type }} confirmed=${found?.type}"
+                            if (analysisTrace.size >= 60) analysisTrace.removeFirst()
+                            analysisTrace.addLast(trace)
+                            android.util.Log.d("DroneScanner", trace)
                             if (found != null) break
                         }
                         delay(250)
@@ -441,6 +478,7 @@ object DroneScannerManager {
                     statusMessage = e.localizedMessage ?: "巡航失敗")
                 Toast.makeText(appContext, _status.value.statusMessage, Toast.LENGTH_LONG).show()
             } finally {
+                wakeRenewal?.cancel()
                 if (captureGeneration == captureToken) {
                     releaseWakeLock()
                     releaseCapture()
@@ -449,11 +487,44 @@ object DroneScannerManager {
         }
     }
 
-    private data class CapturedFrame(val bitmap: Bitmap, val time: Long)
+    private fun openPikminBloom(context: Context) {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage("com.nianticlabs.pikmin")
+            ?: return
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(launchIntent) }
+            .onFailure { android.util.Log.w("DroneScanner", "Unable to open PIKMIN", it) }
+    }
+
+    private data class CapturedFrame(val bitmap: Bitmap, val time: Long, val isBlank: Boolean)
     private fun captureCurrentScreen(after: Long): CapturedFrame? = synchronized(bitmapLock) {
         val current = latestBitmap ?: return@synchronized null
         if (current.isRecycled || frameTime <= after || SystemClock.elapsedRealtime() - frameTime > 1000) return@synchronized null
-        CapturedFrame(current.copy(Bitmap.Config.ARGB_8888, false), frameTime)
+        CapturedFrame(current.copy(Bitmap.Config.ARGB_8888, false), frameTime, isBlankCapture(current))
+    }
+
+    internal fun isBlankCapture(bitmap: Bitmap): Boolean {
+        val startX = bitmap.width / 20
+        val endX = bitmap.width * 19 / 20
+        val startY = bitmap.height / 10
+        val endY = bitmap.height * 9 / 10
+        val stepX = ((endX - startX) / 40).coerceAtLeast(1)
+        val stepY = ((endY - startY) / 60).coerceAtLeast(1)
+        var samples = 0
+        var visible = 0
+        var y = startY
+        while (y < endY) {
+            var x = startX
+            while (x < endX) {
+                val pixel = bitmap.getPixel(x, y)
+                if (android.graphics.Color.red(pixel) > 24 ||
+                    android.graphics.Color.green(pixel) > 24 ||
+                    android.graphics.Color.blue(pixel) > 24) visible++
+                samples++
+                x += stepX
+            }
+            y += stepY
+        }
+        return samples > 0 && visible * 100 < samples
     }
 
     fun fail(message: String) {
@@ -469,6 +540,7 @@ object DroneScannerManager {
         prefs: PreferencesRepo
     ) {
         val label = MushroomType.getDisplayName(target.type)
+        check(MockLocationService.updateLocation(context, location)) { "目標已辨識，但定位已停止，無法保持觀測航點" }
 
         _status.value = _status.value.copy(
             phase = ScanPhase.FOUND,
@@ -482,7 +554,6 @@ object DroneScannerManager {
         // Keep the observation waypoint. An uncalibrated pixel estimate must not trigger a teleport.
         prefs.lastLatitude = location.latitude
         prefs.lastLongitude = location.longitude
-        MockLocationService.updateLocation(context, location)
         prefs.addHistory(location.latitude, location.longitude, "候選觀測點 $label")
 
         // 1. 手機多段強震動提示

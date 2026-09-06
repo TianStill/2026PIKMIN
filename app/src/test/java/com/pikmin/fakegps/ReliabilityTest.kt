@@ -30,6 +30,16 @@ class ReliabilityTest {
         val tracker = FrameConfirmation()
         repeat(10) { assertNull(tracker.observe(100, listOf(candidate()))) }
     }
+    @Test fun candidateAtDeadlineRemainsPendingUntilConfirmedOrMissed() {
+        val tracker = FrameConfirmation()
+        assertFalse(tracker.hasPendingCandidate)
+        assertNull(tracker.observe(2800, listOf(candidate())))
+        assertTrue(tracker.hasPendingCandidate)
+        assertNull(tracker.observe(3050, listOf(candidate())))
+        assertNotNull(tracker.observe(3300, listOf(candidate())))
+        tracker.observe(3550, emptyList())
+        assertFalse(tracker.hasPendingCandidate)
+    }
     @Test fun missedFrameResetsConfirmation() {
         val tracker = FrameConfirmation()
         tracker.observe(100, listOf(candidate())); tracker.observe(350, emptyList())

@@ -7,6 +7,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pikmin.fakegps.cv.MushroomDetector
+import com.pikmin.fakegps.cv.MushroomType
+import com.pikmin.fakegps.drone.DroneScannerManager
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -15,6 +17,66 @@ import org.junit.Test
 import java.io.File
 
 class DetectorInstrumentedTest {
+    @Test fun allLargeElementReferencesDetectAtSourceAndCruiseResolution() {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        val samples = listOf(
+            "large-electric.jpg" to MushroomType.LARGE_ELECTRIC,
+            "large-poison.jpg" to MushroomType.LARGE_POISON,
+            "large-fire.jpg" to MushroomType.LARGE_FIRE,
+            "large-water.png" to MushroomType.LARGE_WATER,
+            "large-crystal.jpg" to MushroomType.LARGE_CRYSTAL
+        )
+        for ((filename, expected) in samples) {
+            val bitmap = assets.open("element-samples/$filename").use { BitmapFactory.decodeStream(it) }
+                ?: error("Cannot decode $filename")
+            try {
+                val sourcePredictions = MushroomDetector.detectMushrooms(bitmap, setOf(expected))
+                assertTrue("$filename source did not detect $expected: $sourcePredictions",
+                    sourcePredictions.any { it.type == expected })
+                val cruise = Bitmap.createScaledBitmap(
+                    bitmap,
+                    720,
+                    (bitmap.height * 720f / bitmap.width).toInt(),
+                    true
+                )
+                try {
+                    val cruisePredictions = MushroomDetector.detectMushrooms(cruise, setOf(expected))
+                    assertTrue("$filename cruise-size did not detect $expected: $cruisePredictions",
+                        cruisePredictions.any { it.type == expected })
+                } finally { if (cruise !== bitmap) cruise.recycle() }
+            } finally { bitmap.recycle() }
+        }
+    }
+
+    @Test fun captureHealthRejectsBlackFrames() {
+        val black = Bitmap.createBitmap(720, 1280, Bitmap.Config.ARGB_8888)
+        val map = Bitmap.createBitmap(720, 1280, Bitmap.Config.ARGB_8888)
+        try {
+            black.eraseColor(Color.BLACK)
+            map.eraseColor(Color.rgb(65, 150, 70))
+            assertTrue(DroneScannerManager.isBlankCapture(black))
+            assertFalse(DroneScannerManager.isBlankCapture(map))
+        } finally { black.recycle(); map.recycle() }
+    }
+    @Test fun diagnoseCapturedGameScreen() {
+        val args = InstrumentationRegistry.getArguments()
+        assumeTrue("No diagnostic capture requested", args.getString("diagnoseCapture") == "true")
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val bitmap = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            automation.executeShellCommand("cat /sdcard/Download/pikmin-diagnostic.png")
+        ).use { BitmapFactory.decodeStream(it) } ?: error("Cannot read diagnostic capture")
+        try {
+            val predictions = MushroomDetector.detectMushrooms(bitmap)
+            android.util.Log.i("CvEvaluation", "diagnostic ${bitmap.width}x${bitmap.height}: $predictions")
+            val capture = Bitmap.createScaledBitmap(bitmap, 720, (bitmap.height * 720f / bitmap.width).toInt(), true)
+            try {
+                val water = MushroomDetector.detectMushrooms(capture, setOf(com.pikmin.fakegps.cv.MushroomType.LARGE_WATER))
+                InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply {
+                    putString("stream", "Original: $predictions\nCapture-size water-only: $water\n")
+                })
+            } finally { if (capture !== bitmap) capture.recycle() }
+        } finally { bitmap.recycle() }
+    }
     @Test fun grassIsNotAMushroom() {
         val bitmap = Bitmap.createBitmap(480, 640, Bitmap.Config.ARGB_8888)
         try {

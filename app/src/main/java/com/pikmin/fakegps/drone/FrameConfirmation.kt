@@ -6,6 +6,7 @@ import kotlin.math.max
 
 /** Three distinct, consecutive frames must agree; repeated/stale frames never count. */
 class FrameConfirmation {
+    val hasPendingCandidate: Boolean get() = tracks.isNotEmpty()
     private var timestamp = -1L
     private var tracks = emptyList<Pair<DetectedMushroom, Int>>()
     fun observe(frameTime: Long, detections: List<DetectedMushroom>): DetectedMushroom? {

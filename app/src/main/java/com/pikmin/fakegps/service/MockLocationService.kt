@@ -229,4 +229,8 @@ class MockLocationService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun dump(fd: java.io.FileDescriptor, writer: java.io.PrintWriter, args: Array<out String>?) {
+        writer.println(DroneScannerManager.diagnosticSummary())
+    }
 }

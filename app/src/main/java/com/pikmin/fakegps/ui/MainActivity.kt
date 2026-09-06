@@ -120,6 +120,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun createDroneCaptureIntent(context: Context): android.content.Intent {
+    val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as
+        android.media.projection.MediaProjectionManager
+    // Keep the Android 14+ chooser so the user can explicitly select PIKMIN.
+    // Forcing default-display capture skips that chooser and leaves this app in front.
+    return manager.createScreenCaptureIntent()
+}
+
 data class DroneScanConfig(
     val radiusKm: Double,
     val targetTypes: Set<com.pikmin.fakegps.cv.MushroomType>,
@@ -576,8 +584,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             pendingResume = false
                             pendingSessionToken = MockLocationService.sessionToken
                             authorizingScan = true
-                            val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                            try { mediaProjectionLauncher.launch(manager.createScreenCaptureIntent()) }
+                            try { mediaProjectionLauncher.launch(createDroneCaptureIntent(context)) }
                             catch (e: Exception) {
                                 authorizingScan = false
                                 pendingScanParams = null
@@ -591,8 +598,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             pendingResume = true
                             pendingSessionToken = MockLocationService.sessionToken
                             authorizingScan = true
-                            val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                            try { mediaProjectionLauncher.launch(manager.createScreenCaptureIntent()) }
+                            try { mediaProjectionLauncher.launch(createDroneCaptureIntent(context)) }
                             catch (e: Exception) {
                                 authorizingScan = false
                                 pendingResume = false
