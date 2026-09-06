@@ -1,101 +1,87 @@
 param(
+    [switch]$ConfirmRelease,
     [string]$Version = "",
     [string]$Notes = "Application update and improvements"
 )
-
 $ErrorActionPreference = "Stop"
-
-# 1. Setup environment paths
-$env:Path = "C:\Program Files\GitHub CLI;C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:Path
-$jdkPath = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
-if (Test-Path $jdkPath) {
-    $env:JAVA_HOME = $jdkPath
+Set-StrictMode -Version Latest
+if (-not $ConfirmRelease) { throw "Release requires explicit user approval. Re-run with -ConfirmRelease only after approval." }
+$env:Path = "C:\Program Files\GitHub CLI;C:\Program Files\Git\cmd;" + $env:Path
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+function Assert-Exit([string]$operation) {
+    if ($LASTEXITCODE -ne 0) { throw "$operation failed (exit $LASTEXITCODE)." }
 }
-
-Write-Host "=================================================" -ForegroundColor Cyan
-Write-Host "  Fake GPS Pro - Release and Sync to GitHub" -ForegroundColor Cyan
-Write-Host "=================================================" -ForegroundColor Cyan
-
-# 2. Read app/build.gradle.kts
-$gradleFile = Join-Path $PSScriptRoot "app\build.gradle.kts"
-if (-not (Test-Path $gradleFile)) {
-    Write-Error "Cannot find $gradleFile"
-}
-$content = Get-Content $gradleFile -Raw
-
-$codeMatch = [regex]::Match($content, 'versionCode\s*=\s*(\d+)')
-$nameMatch = [regex]::Match($content, 'versionName\s*=\s*"([^"]+)"')
-
-if (-not $codeMatch.Success -or -not $nameMatch.Success) {
-    Write-Error "Failed to parse versionCode or versionName from build.gradle.kts"
-}
-
-$currCode = $codeMatch.Groups[1].Value
-$currName = $nameMatch.Groups[1].Value
-
-$newCode = [int]$currCode + 1
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $parts = $currName.Split('.')
-    if ($parts.Length -ge 3) {
-        $lastNum = [int]$parts[2] + 1
-        $newName = "$($parts[0]).$($parts[1]).$lastNum"
-    } else {
-        $newName = "$currName.1"
+Push-Location $PSScriptRoot
+try {
+    foreach ($key in @('PIKMIN_RELEASE_STORE_FILE', 'PIKMIN_RELEASE_STORE_PASSWORD', 'PIKMIN_RELEASE_KEY_ALIAS', 'PIKMIN_RELEASE_KEY_PASSWORD')) {
+        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($key))) { throw "Missing signing setting: $key" }
     }
-} else {
-    $newName = $Version.TrimStart('v').TrimStart('V').Trim()
-}
+    if (-not (Test-Path -LiteralPath $env:PIKMIN_RELEASE_STORE_FILE -PathType Leaf)) { throw "Signing keystore does not exist." }
+    $branch = git branch --show-current
+    Assert-Exit 'Read branch'
+    if ($branch -ne 'main') { throw "Release must run from main." }
+    $changes = git status --porcelain
+    Assert-Exit 'Read working tree'
+    if ($changes) { throw "Commit reviewed changes before releasing. Working tree must be clean." }
+    $remote = git remote get-url origin
+    Assert-Exit 'Read origin'
+    if ($remote -notin @('https://github.com/TianStill/2026PIKMIN.git', 'git@github.com:TianStill/2026PIKMIN.git')) { throw "Unexpected release repository." }
+    gh auth status
+    Assert-Exit 'GitHub authentication'
+    git fetch origin main --tags
+    Assert-Exit 'Fetch main'
+    $behind = git rev-list --count HEAD..origin/main
+    Assert-Exit 'Check remote history'
+    if ([int]$behind -ne 0) { throw "Local main is behind or diverged from origin/main." }
 
-$tag = "v$newName"
-
-Write-Host "Current version: v$currName (Code: $currCode)" -ForegroundColor Yellow
-Write-Host "Target version:  $tag (Code: $newCode)" -ForegroundColor Green
-Write-Host "Release notes:   $Notes" -ForegroundColor Gray
-
-# 3. Update app/build.gradle.kts
-$content = [regex]::Replace($content, 'versionCode\s*=\s*\d+', "versionCode = $newCode")
-$replacement = "versionName = `"$newName`""
-$content = [regex]::Replace($content, 'versionName\s*=\s*"[^"]+"', $replacement)
-[System.IO.File]::WriteAllText($gradleFile, $content, [System.Text.Encoding]::UTF8)
-Write-Host "build.gradle.kts updated successfully." -ForegroundColor Green
-
-# 4. Build APK
-Write-Host "`nBuilding APK with Gradle..." -ForegroundColor Cyan
-$gradlewBat = Join-Path $PSScriptRoot "gradlew.bat"
-& $gradlewBat assembleDebug
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Gradle build failed!"
-}
-
-$apkPath = Join-Path $PSScriptRoot "app\build\outputs\apk\debug\app-debug.apk"
-if (-not (Test-Path $apkPath)) {
-    Write-Error "Cannot find APK at $apkPath"
-}
-$apkSize = (Get-Item $apkPath).Length / 1MB
-Write-Host ("APK built successfully: {0:N2} MB" -f $apkSize) -ForegroundColor Green
-
-# 5. Git Commit & Tag
-Write-Host "`nCommitting version change..." -ForegroundColor Cyan
-Copy-Item $apkPath (Join-Path $PSScriptRoot "app-debug.apk") -Force
-git add -A
-git commit -m "chore(release): bump version to $tag - $Notes"
-git tag -a $tag -m "Release $tag - $Notes"
-
-# 6. Push to GitHub
-Write-Host "Pushing commits and tags to GitHub..." -ForegroundColor Cyan
-git push origin main --tags
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Git push failed!"
-}
-
-# 7. Create GitHub Release and upload APK
-Write-Host "`nCreating GitHub Release and uploading APK..." -ForegroundColor Cyan
-& "C:\Program Files\GitHub CLI\gh.exe" release create $tag $apkPath --title "Fake GPS Pro $tag" --notes "$Notes"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Release creation returned non-zero, attempting upload with clobber..." -ForegroundColor Yellow
-    & "C:\Program Files\GitHub CLI\gh.exe" release upload $tag $apkPath --clobber
-}
-
-Write-Host "`nRelease $tag successfully published and synced to GitHub!" -ForegroundColor Green
-Write-Host "URL: https://github.com/TianStill/2026PIKMIN/releases/tag/$tag" -ForegroundColor Cyan
-Write-Host "Mobile app and in-game updater will detect this update automatically!" -ForegroundColor Yellow
+    $gradleFile = Join-Path $PSScriptRoot 'app/build.gradle.kts'
+    $original = [IO.File]::ReadAllBytes($gradleFile)
+    $content = [IO.File]::ReadAllText($gradleFile)
+    $codeMatch = [regex]::Match($content, 'versionCode\s*=\s*(\d+)')
+    $nameMatch = [regex]::Match($content, 'versionName\s*=\s*"([^"]+)"')
+    if (-not $codeMatch.Success -or -not $nameMatch.Success) { throw "Cannot read version." }
+    $currentVersion = [version]$nameMatch.Groups[1].Value
+    if ([string]::IsNullOrWhiteSpace($Version)) { $Version = "$($currentVersion.Major).$($currentVersion.Minor).$($currentVersion.Build + 1)" }
+    $Version = $Version.TrimStart('v', 'V')
+    if ($Version -notmatch '^\d+\.\d+\.\d+$' -or [version]$Version -le $currentVersion) { throw "Release version must be a newer major.minor.patch version." }
+    $tag = "v$Version"
+    $existingTags = git tag --list $tag
+    Assert-Exit 'Check tag'
+    if ($existingTags) { throw "Tag already exists: $tag" }
+    $newCode = [int]$codeMatch.Groups[1].Value + 1
+    $committed = $false
+    $notesFile = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+    try {
+        $content = [regex]::Replace($content, 'versionCode\s*=\s*\d+', "versionCode = $newCode")
+        $content = [regex]::Replace($content, 'versionName\s*=\s*"[^"]+"', "versionName = `"$Version`"")
+        [IO.File]::WriteAllText($gradleFile, $content, [Text.UTF8Encoding]::new($false))
+        & ./gradlew.bat testDebugUnitTest lintDebug assembleRelease
+        Assert-Exit 'Release validation and build'
+        $apkPath = Join-Path $PSScriptRoot 'app/build/outputs/apk/release/app-release.apk'
+        if (-not (Test-Path -LiteralPath $apkPath)) { throw "Signed release APK missing." }
+        $hash = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $checksumPath = "$apkPath.sha256"
+        [IO.File]::WriteAllText($checksumPath, "$hash  app-release.apk`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($notesFile, $Notes, [Text.UTF8Encoding]::new($false))
+        git add -- app/build.gradle.kts
+        Assert-Exit 'Stage version'
+        git commit -m "chore(release): bump version to $tag"
+        Assert-Exit 'Commit version'
+        $committed = $true
+        git tag -a $tag -m "Release $tag"
+        Assert-Exit 'Create tag'
+        git push --atomic origin HEAD:main "refs/tags/$tag"
+        Assert-Exit 'Push release commit and tag'
+        gh release create $tag $apkPath $checksumPath --verify-tag --title "Fake GPS Pro $tag" --notes-file $notesFile
+        Assert-Exit 'Publish release'
+        Write-Host "Published $tag successfully."
+    } catch {
+        if (-not $committed) {
+            [IO.File]::WriteAllBytes($gradleFile, $original)
+            git restore --staged -- app/build.gradle.kts
+        }
+        throw
+    } finally {
+        if (Test-Path -LiteralPath $notesFile) { Remove-Item -LiteralPath $notesFile -Force }
+    }
+} finally { Pop-Location }

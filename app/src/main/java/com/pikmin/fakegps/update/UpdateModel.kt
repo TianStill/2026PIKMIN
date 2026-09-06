@@ -12,7 +12,8 @@ data class AppReleaseInfo(
     val releaseNotes: String,
     val downloadUrl: String,
     val apkSize: Long,
-    val publishedAt: String
+    val publishedAt: String,
+    val sha256: String? = null
 )
 
 /**

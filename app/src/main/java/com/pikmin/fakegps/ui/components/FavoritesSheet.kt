@@ -100,7 +100,7 @@ fun FavoritesSheet(
                                         style = MaterialTheme.typography.bodyLarge
                                     )
                                     Text(
-                                        text = String.format("%.5f, %.5f", bookmark.latitude, bookmark.longitude),
+                                        text = String.format(java.util.Locale.US, "%.5f, %.5f", bookmark.latitude, bookmark.longitude),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.outline
                                     )

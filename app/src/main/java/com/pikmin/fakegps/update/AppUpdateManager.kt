@@ -1,273 +1,200 @@
 package com.pikmin.fakegps.update
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.withContext
+import com.pikmin.fakegps.R
+import com.pikmin.fakegps.ui.MainActivity
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 object AppUpdateManager {
-
-    private const val TAG = "AppUpdateManager"
-    private const val GITHUB_OWNER = "TianStill"
-    private const val GITHUB_REPO = "2026PIKMIN"
-    private const val RELEASES_API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
-
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
-
+    private const val API = "https://api.github.com/repos/TianStill/2026PIKMIN/releases/latest"
+    private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS).build()
+    // Downloads intentionally survive UI dismissal, and use only application context.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val downloadLock = Mutex()
+    private val checkLock = Mutex()
+    private var downloadJob: Job? = null
     private val _updateState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
-    val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
-
-    // 快取最新版本資訊
+    val updateState = _updateState.asStateFlow()
     var latestReleaseInfo: AppReleaseInfo? = null
         private set
 
-    fun resetState() {
-        _updateState.value = UpdateUiState.Idle
-    }
+    fun resetState() { if (_updateState.value !is UpdateUiState.Downloading) _updateState.value = UpdateUiState.Idle }
 
-    /**
-     * 檢查 GitHub 是否有更新版本
-     * @param currentVersion 例如 "1.0.0"
-     * @param silentCheck 若為背景定期檢查或開機自檢，無更新時不彈出通知
-     */
-    suspend fun checkForUpdates(currentVersion: String, silentCheck: Boolean = false): AppReleaseInfo? {
-        return withContext(Dispatchers.IO) {
-            try {
-                if (!silentCheck) {
-                    _updateState.value = UpdateUiState.Checking
+    suspend fun checkForUpdates(currentVersion: String, silentCheck: Boolean = false): AppReleaseInfo? = checkLock.withLock {
+        if (downloadJob?.isActive == true || _updateState.value is UpdateUiState.ReadyToInstall) return@withLock null
+        if (!silentCheck) _updateState.value = UpdateUiState.Checking
+        try {
+            val release = withContext(Dispatchers.IO) {
+                client.newCall(Request.Builder().url(API).header("Accept", "application/vnd.github+json").build()).execute().use { response ->
+                    check(response.isSuccessful) { "查詢更新失敗 (HTTP ${response.code})" }
+                    val json = JSONObject(response.body?.string() ?: error("更新資訊為空"))
+                    val assets = json.getJSONArray("assets")
+                    val apks = (0 until assets.length()).map { assets.getJSONObject(it) }
+                        .filter { it.getString("name").endsWith(".apk", true) }
+                    val asset = apks.firstOrNull { it.getString("name") == "app-release.apk" }
+                        ?: apks.singleOrNull() ?: error("發布附件沒有唯一可識別的 APK")
+                    val tag = json.getString("tag_name")
+                    val digest = asset.optString("digest").takeIf { it.isNotBlank() && it != "null" }
+                    if (digest != null) require(digest.startsWith("sha256:")) { "不支援的 APK 雜湊格式" }
+                    AppReleaseInfo(tag, tag.trimStart('v', 'V'), json.optString("name", tag),
+                        json.optString("body"), asset.getString("browser_download_url"), asset.getLong("size"),
+                        json.optString("published_at"), digest?.removePrefix("sha256:"))
                 }
-
-                val request = Request.Builder()
-                    .url(RELEASES_API_URL)
-                    .header("Accept", "application/vnd.github.v3+json")
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        if (!silentCheck) {
-                            _updateState.value = UpdateUiState.Error("無法獲取更新資訊 (HTTP ${response.code})")
-                        }
-                        return@withContext null
-                    }
-
-                    val bodyString = response.body?.string() ?: ""
-                    val json = JSONObject(bodyString)
-
-                    val tagName = json.optString("tag_name", "")
-                    val title = json.optString("name", tagName)
-                    val body = json.optString("body", "無更新說明")
-                    val publishedAt = json.optString("published_at", "")
-
-                    val cleanRemoteVersion = tagName.trimStart('v', 'V').trim()
-                    val cleanCurrentVersion = currentVersion.trimStart('v', 'V').trim()
-
-                    // 尋找 APK 附檔
-                    var downloadUrl = ""
-                    var apkSize = 0L
-                    val assets = json.optJSONArray("assets")
-                    if (assets != null) {
-                        for (i in 0 until assets.length()) {
-                            val asset = assets.getJSONObject(i)
-                            val name = asset.optString("name", "")
-                            if (name.endsWith(".apk", ignoreCase = true)) {
-                                downloadUrl = asset.optString("browser_download_url", "")
-                                apkSize = asset.optLong("size", 0L)
-                                break
-                            }
-                        }
-                    }
-
-                    if (downloadUrl.isBlank()) {
-                        if (!silentCheck) {
-                            _updateState.value = UpdateUiState.Error("最新發布中未找到 APK 安裝檔")
-                        }
-                        return@withContext null
-                    }
-
-                    val releaseInfo = AppReleaseInfo(
-                        tagName = tagName,
-                        versionName = cleanRemoteVersion,
-                        title = title,
-                        releaseNotes = body,
-                        downloadUrl = downloadUrl,
-                        apkSize = apkSize,
-                        publishedAt = publishedAt
-                    )
-
-                    latestReleaseInfo = releaseInfo
-
-                    if (isNewerVersion(cleanRemoteVersion, cleanCurrentVersion)) {
-                        _updateState.value = UpdateUiState.UpdateAvailable(releaseInfo)
-                        return@withContext releaseInfo
-                    } else {
-                        if (!silentCheck) {
-                            _updateState.value = UpdateUiState.UpToDate(currentVersion)
-                        } else {
-                            _updateState.value = UpdateUiState.Idle
-                        }
-                        return@withContext null
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "檢查更新失敗", e)
-                if (!silentCheck) {
-                    _updateState.value = UpdateUiState.Error("檢查更新失敗: ${e.localizedMessage ?: "網路異常"}")
-                }
+            }
+            latestReleaseInfo = release
+            if (downloadJob?.isActive == true) return@withLock null
+            val order = VersionOrder.compare(release.versionName, currentVersion) ?: error("無法辨識版本格式")
+            if (order > 0) {
+                _updateState.value = UpdateUiState.UpdateAvailable(release)
+                release
+            } else {
+                if (!silentCheck) _updateState.value = UpdateUiState.UpToDate(currentVersion)
                 null
             }
+        } catch (e: CancellationException) { throw e
+        } catch (e: Exception) {
+            if (!silentCheck && downloadJob?.isActive != true) _updateState.value = UpdateUiState.Error(e.localizedMessage ?: "查詢失敗")
+            null
         }
     }
 
-    /**
-     * 下載 APK 安裝檔案並提供即時進度回調
-     */
-    suspend fun downloadApk(context: Context, releaseInfo: AppReleaseInfo): File? {
-        return withContext(Dispatchers.IO) {
+    fun startDownload(context: Context, release: AppReleaseInfo) {
+        if (downloadJob?.isActive == true) return
+        val app = context.applicationContext
+        downloadJob = scope.launch { downloadApk(app, release) }
+    }
+
+    suspend fun downloadApk(context: Context, releaseInfo: AppReleaseInfo): File? = downloadLock.withLock {
+        withContext(Dispatchers.IO) {
+            val directory = File(context.cacheDir, "updates").apply { mkdirs() }
+            val partial = File(directory, "app-update.apk.part")
+            val output = File(directory, "app-update.apk")
             try {
-                val updateDir = File(context.cacheDir, "updates").apply {
-                    if (!exists()) mkdirs()
-                }
-                val outputFile = File(updateDir, "app-update-${releaseInfo.versionName}.apk")
-
-                _updateState.value = UpdateUiState.Downloading(0f, 0L, releaseInfo.apkSize, releaseInfo)
-
-                val request = Request.Builder()
-                    .url(releaseInfo.downloadUrl)
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        _updateState.value = UpdateUiState.Error("下載失敗 (HTTP ${response.code})")
-                        return@withContext null
-                    }
-
-                    val body = response.body ?: run {
-                        _updateState.value = UpdateUiState.Error("伺服器未回傳檔案內容")
-                        return@withContext null
-                    }
-
-                    val totalBytes = if (releaseInfo.apkSize > 0) releaseInfo.apkSize else body.contentLength()
-                    var downloadedBytes = 0L
-
+                require(releaseInfo.downloadUrl.startsWith("https://github.com/TianStill/2026PIKMIN/releases/download/")) { "更新來源不符" }
+                _updateState.value = UpdateUiState.Downloading(0f, 0, releaseInfo.apkSize, releaseInfo)
+                client.newCall(Request.Builder().url(releaseInfo.downloadUrl).build()).execute().use { response ->
+                    check(response.isSuccessful) { "下載失敗 (HTTP ${response.code})" }
+                    val body = response.body ?: error("下載內容為空")
+                    val total = releaseInfo.apkSize.takeIf { it > 0 } ?: body.contentLength()
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    var downloaded = 0L
+                    var lastProgress = 0L
                     body.byteStream().use { input ->
-                        FileOutputStream(outputFile).use { output ->
-                            val buffer = ByteArray(8 * 1024)
-                            var read: Int
-                            var lastProgressTime = 0L
-
-                            while (input.read(buffer).also { read = it } != -1) {
-                                output.write(buffer, 0, read)
-                                downloadedBytes += read
-
-                                val now = System.currentTimeMillis()
-                                if (now - lastProgressTime > 150 || downloadedBytes == totalBytes) {
-                                    lastProgressTime = now
-                                    val progress = if (totalBytes > 0) {
-                                        downloadedBytes.toFloat() / totalBytes.toFloat()
-                                    } else {
-                                        0f
-                                    }
-                                    _updateState.value = UpdateUiState.Downloading(
-                                        progress = progress.coerceIn(0f, 1f),
-                                        downloadedBytes = downloadedBytes,
-                                        totalBytes = totalBytes,
-                                        releaseInfo = releaseInfo
-                                    )
+                        partial.outputStream().use { target ->
+                            val buffer = ByteArray(8192)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                target.write(buffer, 0, count)
+                                digest.update(buffer, 0, count)
+                                downloaded += count
+                                require(total <= 0 || downloaded <= total) { "APK 超出預期大小" }
+                                val now = android.os.SystemClock.elapsedRealtime()
+                                if (now - lastProgress >= 500) {
+                                    lastProgress = now
+                                    val progress = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else 0f
+                                    _updateState.value = UpdateUiState.Downloading(progress, downloaded, total, releaseInfo)
+                                    notify(context, "正在下載更新", "${(progress * 100).toInt()}%", (progress * 100).toInt())
                                 }
                             }
-                            output.flush()
                         }
                     }
-
-                    _updateState.value = UpdateUiState.ReadyToInstall(outputFile, releaseInfo)
-                    outputFile
+                    DownloadIntegrity.verify(downloaded, total, digest.digest().joinToString("") { "%02x".format(it) }, releaseInfo.sha256)
                 }
+                verifyPackage(context, partial, releaseInfo.versionName)
+                java.nio.file.Files.move(partial.toPath(), output.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                _updateState.value = UpdateUiState.ReadyToInstall(output, releaseInfo)
+                notify(context, "更新檔已驗證", "開啟 APP 確認安裝")
+                output
+            } catch (e: CancellationException) {
+                _updateState.value = UpdateUiState.Error("下載已取消")
+                throw e
             } catch (e: Exception) {
-                Log.e(TAG, "APK 下載失敗", e)
-                _updateState.value = UpdateUiState.Error("下載失敗: ${e.localizedMessage ?: "網路連線中斷"}")
+                _updateState.value = UpdateUiState.Error(e.localizedMessage ?: "下載或驗證失敗")
+                notify(context, "更新失敗", e.localizedMessage ?: "請開啟 APP 查看")
                 null
-            }
+            } finally { partial.delete() }
         }
     }
 
-    /**
-     * 啟動 Android 系統安裝程序
-     */
-    fun installApk(context: Context, apkFile: File): Boolean {
-        return try {
-            if (!apkFile.exists() || apkFile.length() == 0L) {
-                _updateState.value = UpdateUiState.Error("APK 安裝檔不存在或已損毀")
-                return false
-            }
+    @Suppress("DEPRECATION")
+    private fun verifyPackage(context: Context, file: File, expectedVersion: String? = null) {
+        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        val apk = context.packageManager.getPackageArchiveInfo(file.absolutePath, flags) ?: error("APK 格式無效")
+        val current = context.packageManager.getPackageInfo(context.packageName, flags)
+        require(apk.packageName == context.packageName) { "APK 套件名稱不符" }
+        val apkCode = if (Build.VERSION.SDK_INT >= 28) apk.longVersionCode else apk.versionCode.toLong()
+        val currentCode = if (Build.VERSION.SDK_INT >= 28) current.longVersionCode else current.versionCode.toLong()
+        require(apkCode > currentCode) { "APK 版本未高於目前版本" }
+        if (expectedVersion != null) require(apk.versionName == expectedVersion) { "APK 版本與發布標籤不符" }
+        fun certificates(info: PackageInfo): Set<String> {
+            val signatures = if (Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures
+            return signatures.orEmpty().map {
+                MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).joinToString("") { byte -> "%02x".format(byte) }
+            }.toSet()
+        }
+        val installed = certificates(current)
+        require(installed.isNotEmpty() && installed == certificates(apk)) { "APK 簽章與已安裝版本不同，不能直接覆蓋更新" }
+    }
 
-            // Android 8.0+ 檢測是否有安裝未知來源權限
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (!context.packageManager.canRequestPackageInstalls()) {
-                    val settingsIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(settingsIntent)
-                    return false
-                }
-            }
-
-            val apkUri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                apkFile
-            )
-
-            val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(apkUri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-
-            context.startActivity(installIntent)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "啟動安裝失敗", e)
-            _updateState.value = UpdateUiState.Error("無法啟動系統安裝程式: ${e.localizedMessage}")
+    fun installApk(context: Context, apkFile: File): Boolean = try {
+        verifyPackage(context, apkFile)
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             false
+        } else {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
+            context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
         }
+    } catch (e: Exception) {
+        _updateState.value = UpdateUiState.Error(e.localizedMessage ?: "無法安裝")
+        false
     }
 
-    /**
-     * 語意化版本號比較演算法 (例如 "1.0.1" > "1.0.0")
-     */
-    fun isNewerVersion(remoteVersion: String, currentVersion: String): Boolean {
-        try {
-            val remoteParts = remoteVersion.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
-            val currentParts = currentVersion.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
-
-            val maxLen = maxOf(remoteParts.size, currentParts.size)
-            for (i in 0 until maxLen) {
-                val remoteNum = remoteParts.getOrElse(i) { 0 }
-                val currentNum = currentParts.getOrElse(i) { 0 }
-                if (remoteNum > currentNum) return true
-                if (remoteNum < currentNum) return false
-            }
-            return false
-        } catch (e: Exception) {
-            return remoteVersion != currentVersion
-        }
+    fun announceUpdate(context: Context, release: AppReleaseInfo) {
+        notify(context, "發現新版本 ${release.tagName}", "開啟 APP 查看更新並下載")
     }
+
+    private fun notify(context: Context, title: String, text: String, progress: Int? = null) {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channel = "app_updates"
+        manager.createNotificationChannel(NotificationChannel(channel, "APP 更新", NotificationManager.IMPORTANCE_LOW))
+        val open = PendingIntent.getActivity(context, 2002, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val builder = NotificationCompat.Builder(context, channel).setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title).setContentText(text).setContentIntent(open).setOnlyAlertOnce(true)
+            .setOngoing(progress != null).setAutoCancel(progress == null)
+        if (progress != null) builder.setProgress(100, progress, false)
+        try { manager.notify(2002, builder.build()) } catch (_: SecurityException) { }
+    }
+
+    fun isNewerVersion(remoteVersion: String, currentVersion: String): Boolean =
+        (VersionOrder.compare(remoteVersion, currentVersion) ?: 0) > 0
 }

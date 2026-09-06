@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
@@ -20,8 +20,22 @@ android {
         }
     }
 
+    val signingPath = providers.environmentVariable("PIKMIN_RELEASE_STORE_FILE").orNull
+    val signingPassword = providers.environmentVariable("PIKMIN_RELEASE_STORE_PASSWORD").orNull
+    val signingAlias = providers.environmentVariable("PIKMIN_RELEASE_KEY_ALIAS").orNull
+    val signingKeyPassword = providers.environmentVariable("PIKMIN_RELEASE_KEY_PASSWORD").orNull
+    val hasReleaseSigning = listOf(signingPath, signingPassword, signingAlias, signingKeyPassword).all { !it.isNullOrBlank() }
+    signingConfigs {
+        if (hasReleaseSigning) create("production") {
+            storeFile = file(signingPath!!)
+            storePassword = signingPassword
+            keyAlias = signingAlias
+            keyPassword = signingKeyPassword
+        }
+    }
     buildTypes {
         release {
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("production")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

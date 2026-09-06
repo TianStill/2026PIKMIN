@@ -26,8 +26,8 @@ fun InputCoordinatesDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var latText by remember { mutableStateOf(String.format("%.6f", initialLat)) }
-    var lngText by remember { mutableStateOf(String.format("%.6f", initialLng)) }
+    var latText by remember { mutableStateOf(String.format(java.util.Locale.US, "%.6f", initialLat)) }
+    var lngText by remember { mutableStateOf(String.format(java.util.Locale.US, "%.6f", initialLng)) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(

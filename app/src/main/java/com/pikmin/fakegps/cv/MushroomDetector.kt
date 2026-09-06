@@ -64,7 +64,7 @@ data class DetectedMushroom(
     val y: Int,
     val radius: Int,
     val confidence: Float,
-    val isGiant: Boolean = false
+    val isGiant: Boolean? = null // Size is unknown without distance/zoom calibration.
 )
 
 /**
@@ -120,7 +120,8 @@ object MushroomDetector {
         }
 
         val pixels = IntArray(scaledW * scaledH)
-        scaledBitmap.getPixels(pixels, 0, scaledW, 0, 0, scaledW, scaledH)
+        try { scaledBitmap.getPixels(pixels, 0, scaledW, 0, 0, scaledW, scaledH) }
+        finally { if (scaledBitmap !== sourceBitmap) scaledBitmap.recycle() }
 
         // 僅分析螢幕中段 (排除頂部 8% 狀態列與底部控制底欄)
         val startY = (scaledH * 0.08f).toInt()
@@ -166,7 +167,7 @@ object MushroomDetector {
         val maxBboxH = (scaledH * 0.20f).toInt()
         val maxClusterSize = 3500
 
-        val queue = IntArray(maxClusterSize * 2)
+        val queue = IntArray(scaledW * scaledH)
 
         for (y in startY until endY) {
             val rowOffset = y * scaledW
@@ -190,7 +191,7 @@ object MushroomDetector {
                     // 記錄該聚類內部各色票投票數
                     val typeHistogram = IntArray(MushroomType.entries.size)
 
-                    while (head < tail && tail < queue.size - 8) {
+                    while (head < tail) {
                         val curr = queue[head++]
                         val cx = curr % scaledW
                         val cy = curr / scaledW
@@ -209,15 +210,9 @@ object MushroomDetector {
                         if (cy > maxY) maxY = cy
 
                         // 8 鄰域泛洪擴散：嚴格限制只能在「同一色彩家族」內擴散
-                        val neighbors = intArrayOf(
-                            curr - 1, curr + 1,
-                            curr - scaledW, curr + scaledW,
-                            curr - scaledW - 1, curr - scaledW + 1,
-                            curr + scaledW - 1, curr + scaledW + 1
-                        )
-
-                        for (n in neighbors) {
-                            if (n in 0 until (scaledW * scaledH)) {
+                        for (ny in max(startY, cy - 1)..min(endY - 1, cy + 1)) {
+                            for (nx in max(0, cx - 1)..min(scaledW - 1, cx + 1)) {
+                                val n = ny * scaledW + nx
                                 if (!visited[n] && familyMask[n] == fam) {
                                     visited[n] = true
                                     queue[tail++] = n
@@ -308,9 +303,9 @@ object MushroomDetector {
                     }
 
                     val radius = (max(bboxW, bboxH) / (1.8f * scale)).toInt().coerceAtLeast(24)
-                    val isGiant = count >= 200 || dominantType.category == MushroomCategory.LARGE_ELEMENT
+                    val isGiant: Boolean? = null
 
-                    val confidence = min(1.0f, max(0.60f, purity * 0.9f + 0.1f))
+                    val confidence = purity // Color match score, not a calibrated probability.
 
                     detected.add(
                         DetectedMushroom(

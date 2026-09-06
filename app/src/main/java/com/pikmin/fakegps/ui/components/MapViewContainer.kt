@@ -33,6 +33,8 @@ import org.osmdroid.views.overlay.Marker
 @Composable
 fun MapViewContainer(
     targetLocation: LocationPoint,
+    initialZoom: Double = 16.0,
+    onZoomChanged: (Double) -> Unit = {},
     mapType: MapType,
     historyList: List<LocationHistoryPoint> = emptyList(),
     onMapCenterChanged: (lat: Double, lng: Double) -> Unit,
@@ -41,6 +43,9 @@ fun MapViewContainer(
     isMocking: Boolean = false
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val centerChanged by rememberUpdatedState(onMapCenterChanged)
+    val zoomChanged by rememberUpdatedState(onZoomChanged)
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
     var isUserInteracting by remember { mutableStateOf(false) }
     var historyMarkers by remember { mutableStateOf<List<Marker>>(emptyList()) }
@@ -75,9 +80,9 @@ fun MapViewContainer(
                     icon = markerIcon
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     title = if (historyPoint.note.isNotBlank()) historyPoint.note else "歷史定位點"
-                    snippet = "緯度: ${String.format("%.6f", historyPoint.latitude)}, 經度: ${String.format("%.6f", historyPoint.longitude)}"
+                    snippet = "緯度: ${String.format(java.util.Locale.US, "%.6f", historyPoint.latitude)}, 經度: ${String.format(java.util.Locale.US, "%.6f", historyPoint.longitude)}"
                     setOnMarkerClickListener { clickedMarker, _ ->
-                        onMapCenterChanged(clickedMarker.position.latitude, clickedMarker.position.longitude)
+                        centerChanged(clickedMarker.position.latitude, clickedMarker.position.longitude)
                         map.controller.setCenter(clickedMarker.position)
                         clickedMarker.showInfoWindow()
                         true
@@ -107,10 +112,20 @@ fun MapViewContainer(
     }
 
     // 生命週期釋放
-    DisposableEffect(Unit) {
+    DisposableEffect(lifecycleOwner, mapViewInstance) {
+        val map = mapViewInstance
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> map?.onResume()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> map?.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
-            mapViewInstance?.onPause()
-            mapViewInstance?.onDetach()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            map?.onPause()
+            map?.onDetach()
         }
     }
 
@@ -130,17 +145,18 @@ fun MapViewContainer(
                     }
                     setTileSource(initialTileSource)
                     isTilesScaledToDpi = true    // 自動高畫質 DPI 縮放
-                    isFlingEnabled = true        // 順暢慣性滑動
+                    isFlingEnabled = false        // 座標在放開手指後保持與準心一致
                     setMultiTouchControls(true) // 支援雙指手勢縮放 (Pinch-to-zoom)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 
                     minZoomLevel = 3.0
                     maxZoomLevel = 20.0
-                    controller.setZoom(16.0)
+                    controller.setZoom(initialZoom.coerceIn(3.0, 20.0))
                     controller.setCenter(GeoPoint(targetLocation.latitude, targetLocation.longitude))
 
                     // 🌟 核心手勢優化：觸控滑動/雙指縮放期間完全由 GPU 原生高速處理，放開手指後才同步狀態，徹底消除掉幀與卡頓
                     setOnTouchListener { v, event ->
+                        val handled = v.onTouchEvent(event)
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                                 isUserInteracting = true
@@ -148,13 +164,13 @@ fun MapViewContainer(
                             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                                 isUserInteracting = false
                                 val center = mapCenter
-                                onMapCenterChanged(center.latitude, center.longitude)
+                                centerChanged(center.latitude, center.longitude)
+                                zoomChanged(zoomLevelDouble)
                             }
                         }
-                        v.onTouchEvent(event)
+                        handled
                     }
 
-                    onResume()
                     mapViewInstance = this
                 }
             },

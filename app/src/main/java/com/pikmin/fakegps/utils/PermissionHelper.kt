@@ -95,21 +95,7 @@ object PermissionHelper {
             }
             mode == AppOpsManager.MODE_ALLOWED
         } catch (e: Exception) {
-            // 嘗試透過 addTestProvider 測試
-            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            try {
-                locationManager.addTestProvider(
-                    LocationManager.GPS_PROVIDER,
-                    false, false, false, false,
-                    true, true, true, 1, 1
-                )
-                locationManager.removeTestProvider(LocationManager.GPS_PROVIDER)
-                true
-            } catch (securityEx: SecurityException) {
-                false
-            } catch (ignored: Exception) {
-                true
-            }
+            false // Permission checks must not replace an active test provider.
         }
     }
 }

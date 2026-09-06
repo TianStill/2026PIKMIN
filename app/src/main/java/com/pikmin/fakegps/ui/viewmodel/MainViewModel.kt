@@ -14,6 +14,9 @@ import com.pikmin.fakegps.service.MockLocationService
 import com.pikmin.fakegps.utils.GeoUtils
 import com.pikmin.fakegps.utils.PermissionHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import com.pikmin.fakegps.drone.DroneScannerManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +39,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val context: Context get() = getApplication<Application>().applicationContext
     private val repo = PreferencesRepo(context)
     private val httpClient = OkHttpClient()
+    private var searchJob: Job? = null
+    private var searchCall: okhttp3.Call? = null
+    @Volatile private var searchGeneration = 0L
+    val openDronePanel = MutableStateFlow(false)
 
     // 介面選取的目前座標點
     private val _targetLocation = MutableStateFlow(
@@ -73,7 +80,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         loadBookmarks()
         loadHistory()
+        viewModelScope.launch { repo.changes.collect { loadBookmarks(); loadHistory() } }
+        viewModelScope.launch {
+            liveMockLocation.collect { point -> if (point != null) _targetLocation.value = point }
+        }
     }
+
+    fun setMapZoom(zoom: Double) { mapZoom.value = zoom; repo.lastZoom = zoom }
+
 
     fun setMapType(type: com.pikmin.fakegps.utils.MapType) {
         mapType.value = type
@@ -99,7 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val noteText = if (item.note.isNotBlank()) " (${item.note})" else ""
         Toast.makeText(
             context,
-            "📍 已切換至歷史定位點：${String.format("%.4f, %.4f", item.latitude, item.longitude)}$noteText",
+            "📍 已切換至歷史定位點：${String.format(java.util.Locale.US, "%.4f, %.4f", item.latitude, item.longitude)}$noteText",
             Toast.LENGTH_SHORT
         ).show()
     }
@@ -114,13 +128,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * 當使用者從其他 App 複製經緯度切換回此 App 時自動觸發
      */
     fun checkAndApplyClipboard(text: String): Boolean {
-        if (!isAutoClipboardEnabled.value) return false
+        if (!isAutoClipboardEnabled.value || DroneScannerManager.status.value.isScanning) return false
         val trimmed = text.trim()
-        if (trimmed.isBlank() || trimmed == repo.lastProcessedClipboard) return false
+        if (trimmed.isBlank() || repo.hasProcessedClipboard(trimmed)) return false
 
         val extracted = com.pikmin.fakegps.utils.GeoUtils.extractCoordinatesFromText(trimmed)
         if (extracted != null) {
-            repo.lastProcessedClipboard = trimmed
+            repo.markClipboardProcessed(trimmed)
             setTargetLocation(extracted.latitude, extracted.longitude)
             recordHistory(extracted.latitude, extracted.longitude, extracted.note)
 
@@ -132,7 +146,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val noteInfo = if (extracted.note.isNotBlank()) " (${extracted.note})" else ""
             Toast.makeText(
                 context,
-                "📍 已自動偵測剪貼簿座標：${String.format("%.5f, %.5f", extracted.latitude, extracted.longitude)}$noteInfo，已傳送並開始模擬！",
+                "📍 已自動偵測剪貼簿座標：${String.format(java.util.Locale.US, "%.5f, %.5f", extracted.latitude, extracted.longitude)}$noteInfo，已選取座標；定位狀態請見主畫面",
                 Toast.LENGTH_LONG
             ).show()
             return true
@@ -145,12 +159,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setTargetLocation(latitude: Double, longitude: Double) {
+        if (!latitude.isFinite() || latitude !in -90.0..90.0 || !longitude.isFinite() || longitude !in -180.0..180.0) return
+        if (DroneScannerManager.status.value.isScanning) DroneScannerManager.stopScan()
         _targetLocation.value = _targetLocation.value.copy(
             latitude = latitude,
             longitude = longitude
         )
-        repo.lastLatitude = latitude
-        repo.lastLongitude = longitude
+        repo.saveLocation(latitude, longitude)
 
         // 若正在模擬中，即時更新至新位置 (傳送/Teleport)
         if (isMocking.value) {
@@ -172,21 +187,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        if (isMocking.value) {
+            Toast.makeText(context, "請先停止模擬，再取得真實位置", Toast.LENGTH_LONG).show()
+            return
+        }
         val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
         try {
             val gpsLocation = locationManager?.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
             val netLocation = locationManager?.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
-            val bestLocation = gpsLocation ?: netLocation
+            @Suppress("DEPRECATION")
+            val bestLocation = listOfNotNull(gpsLocation, netLocation).filter {
+                !it.isFromMockProvider && android.os.SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos < 120_000_000_000L
+            }.maxByOrNull { it.elapsedRealtimeNanos }
 
             if (bestLocation != null) {
                 setTargetLocation(bestLocation.latitude, bestLocation.longitude)
                 Toast.makeText(
                     context,
-                    "📍 已定位至目前位置：${String.format("%.4f, %.4f", bestLocation.latitude, bestLocation.longitude)}",
+                    "📍 已定位至目前位置：${String.format(java.util.Locale.US, "%.4f, %.4f", bestLocation.latitude, bestLocation.longitude)}",
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
-                Toast.makeText(context, "正在搜尋 GPS 定位訊號...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "尚無近期真實位置，請在戶外開啟系統定位後再試", Toast.LENGTH_SHORT).show()
             }
         } catch (e: SecurityException) {
             Toast.makeText(context, "定位權限不足", Toast.LENGTH_SHORT).show()
@@ -201,7 +223,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MockLocationService.engineInstance?.enableJitter = enabled
     }
 
-    fun startMocking() {
+    fun startMocking(): Boolean {
+        if (!PermissionHelper.hasLocationPermission(context)) {
+            Toast.makeText(context, "請先在系統設定授予定位權限", Toast.LENGTH_LONG).show()
+            return false
+        }
         if (!PermissionHelper.isMockLocationApp(context)) {
             Toast.makeText(
                 context,
@@ -209,11 +235,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Toast.LENGTH_LONG
             ).show()
             PermissionHelper.openDevelopmentSettings(context)
-            return
+            return false
         }
 
         recordHistory(_targetLocation.value.latitude, _targetLocation.value.longitude)
-        MockLocationService.start(context, _targetLocation.value)
+        return MockLocationService.start(context, _targetLocation.value)
     }
 
     fun stopMocking() {
@@ -224,7 +250,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentPoint = _targetLocation.value
         val bookmark = BookmarkPoint(
             id = UUID.randomUUID().toString(),
-            name = name.ifBlank { "自訂座標 (${String.format("%.4f, %.4f", currentPoint.latitude, currentPoint.longitude)})" },
+            name = name.ifBlank { "自訂座標 (${String.format(java.util.Locale.US, "%.4f, %.4f", currentPoint.latitude, currentPoint.longitude)})" },
             latitude = currentPoint.latitude,
             longitude = currentPoint.longitude
         )
@@ -238,6 +264,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun searchLocation(query: String) {
+        searchJob?.cancel()
+        searchCall?.cancel()
+        val generation = ++searchGeneration
+        _isSearching.value = false
         if (query.isBlank()) {
             _searchResults.value = emptyList()
             return
@@ -261,7 +291,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             _isSearching.value = true
             try {
                 val results = withContext(Dispatchers.IO) {
@@ -272,8 +302,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         .header("User-Agent", "FakeGPS-App-Android")
                         .build()
 
-                    val response = httpClient.newCall(request).execute()
-                    val responseBody = response.body?.string() ?: "[]"
+                    val call = httpClient.newCall(request)
+                    searchCall = call
+                    if (generation != searchGeneration) { call.cancel(); throw CancellationException() }
+                    val responseBody = call.execute().use { response ->
+                        check(response.isSuccessful) { "搜尋失敗 (HTTP ${response.code})" }
+                        response.body?.string() ?: "[]"
+                    }
                     val jsonArray = JSONArray(responseBody)
                     val list = mutableListOf<SearchResult>()
                     for (i in 0 until jsonArray.length()) {
@@ -288,17 +323,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     list
                 }
-                _searchResults.value = results
+                if (generation == searchGeneration) _searchResults.value = results
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 e.printStackTrace()
-                _searchResults.value = emptyList()
+                if (generation == searchGeneration) {
+                    _searchResults.value = emptyList()
+                    Toast.makeText(context, e.localizedMessage ?: "搜尋失敗", Toast.LENGTH_LONG).show()
+                }
             } finally {
-                _isSearching.value = false
+                if (generation == searchGeneration) _isSearching.value = false
             }
         }
     }
 
+    override fun onCleared() {
+        searchCall?.cancel()
+        super.onCleared()
+    }
+
     fun clearSearchResults() {
+        searchGeneration++
+        searchJob?.cancel()
+        searchCall?.cancel()
+        _isSearching.value = false
         _searchResults.value = emptyList()
     }
 }

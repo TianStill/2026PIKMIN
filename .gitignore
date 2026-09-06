@@ -14,3 +14,7 @@ captures/
 .cxx
 *.apk
 *.aab
+
+*.jks
+*.keystore
+/signing.properties

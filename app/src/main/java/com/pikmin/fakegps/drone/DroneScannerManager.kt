@@ -4,9 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -16,6 +14,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
+import androidx.annotation.MainThread
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -25,7 +25,6 @@ import android.widget.Toast
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
 import com.pikmin.fakegps.R
 import com.pikmin.fakegps.ui.MainActivity
@@ -40,24 +39,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+enum class ScanPhase { IDLE, WAITING_FOR_FRAME, SCANNING, FOUND, PAUSED, COMPLETED, ERROR }
+
 data class DroneScanStatus(
+    val phase: ScanPhase = ScanPhase.IDLE,
     val isScanning: Boolean = false,
     val currentIndex: Int = 0,
     val totalPoints: Int = 0,
     val currentCoordinate: LocationPoint? = null,
     val foundTarget: DetectedMushroom? = null,
     val foundLocation: LocationPoint? = null,
+    val estimatedLocation: LocationPoint? = null,
     val statusMessage: String = "待命"
-)
-
-/**
- * 當次巡檢已記錄之蘑菇資料 (用於防止同一顆菇重複跳出)
- */
-data class DiscoveredMushroomRecord(
-    val type: MushroomType,
-    val latitude: Double,
-    val longitude: Double,
-    val timestamp: Long = System.currentTimeMillis()
 )
 
 /**
@@ -84,9 +77,10 @@ data class DroneCruiseProfile(
 /**
  * 無人機雷達巡航與截圖檢測管理器
  */
+@MainThread
 object DroneScannerManager {
 
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var scanJob: Job? = null
 
     private val _status = MutableStateFlow(DroneScanStatus())
@@ -101,6 +95,10 @@ object DroneScannerManager {
     private val bitmapLock = Any()
 
     private var lastFrameTime = 0L
+    private var frameTime = 0L
+    private var captureGeneration = 0L
+    private var projectionCallback: MediaProjection.Callback? = null
+    val hasRemainingPoints: Boolean get() = currentWaypoints.isNotEmpty() && currentStartIndex < currentWaypoints.size
 
     private var screenWidth = 720
     private var screenHeight = 1280
@@ -110,31 +108,31 @@ object DroneScannerManager {
      * 設定從 Activity 取得的 MediaProjection
      */
     fun setupMediaProjection(context: Context, resultCode: Int, data: Intent): Boolean {
+        releaseCapture()
+        if (!MockLocationService.enableMediaProjection()) return false
         return try {
             val mpManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = mpManager.getMediaProjection(resultCode, data)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                mediaProjection?.registerCallback(object : MediaProjection.Callback() {
-                    override fun onStop() {
-                        releaseVirtualDisplay()
+            val projection = mpManager.getMediaProjection(resultCode, data)
+                ?: error("未取得擷取授權")
+            mediaProjection = projection
+            projectionCallback = object : MediaProjection.Callback() {
+                override fun onStop() {
+                    if (mediaProjection === projection) fail("螢幕擷取已中斷，請重新授權後續航")
+                }
+                override fun onCapturedContentResize(width: Int, height: Int) {
+                    // Fixed geometry cannot be reused after rotation or app-window resizing.
+                    val ratio = width.toDouble() / height.coerceAtLeast(1)
+                    if (mediaProjection === projection && kotlin.math.abs(ratio - screenWidth.toDouble() / screenHeight) > 0.05) {
+                        fail("擷取畫面比例已改變，請回到直向全螢幕並重新授權")
                     }
-                }, Handler(Looper.getMainLooper()))
-            }
-
-            initVirtualDisplay(context)
-            val success = mediaProjection != null && virtualDisplay != null
-            if (success) {
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(context, "📸 遊戲畫面雷達監控已就緒！", Toast.LENGTH_SHORT).show()
                 }
             }
-            success
-        } catch (e: Throwable) {
-            e.printStackTrace()
-            Handler(Looper.getMainLooper()).post {
-                Toast.makeText(context, "⚠️ 螢幕擷取權限異常: ${e.message}", Toast.LENGTH_LONG).show()
-            }
+            projection.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))
+            initVirtualDisplay(context.applicationContext)
+            check(virtualDisplay != null) { "無法建立螢幕擷取" }
+            true
+        } catch (e: Exception) {
+            fail("螢幕擷取失敗：${e.localizedMessage}")
             false
         }
     }
@@ -158,13 +156,15 @@ object DroneScannerManager {
             val bgHandler = Handler(backgroundThread!!.looper)
 
             imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 3)
+            val captureToken = captureGeneration
             imageReader?.setOnImageAvailableListener({ reader ->
+                var image: android.media.Image? = null
+                var ownedBitmap: Bitmap? = null
                 try {
-                    val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    val now = System.currentTimeMillis()
+                    image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                    val now = SystemClock.elapsedRealtime()
                     // 限制取幀頻率 (~150ms 一幀，約 6.6 FPS)，既滿足 250ms 採樣需求，又徹底避免 60FPS 頻繁記憶體配置
                     if (now - lastFrameTime < 150L) {
-                        image.close()
                         return@setOnImageAvailableListener
                     }
                     lastFrameTime = now
@@ -179,6 +179,7 @@ object DroneScannerManager {
                     val height = screenHeight
 
                     val tempBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    ownedBitmap = tempBitmap
                     val requiredCapacity = tempBitmap.byteCount
                     val remaining = buffer.remaining()
 
@@ -193,7 +194,6 @@ object DroneScannerManager {
                         safeBuffer.position(0)
                         tempBitmap.copyPixelsFromBuffer(safeBuffer)
                     }
-                    image.close()
 
                     // 🌟 必須使用原生的像素裁剪（保留原始 RGB 色彩，防止 Canvas.drawBitmap 因遊戲畫面 Alpha=0 被透明化抹除）
                     val cleanBitmap = if (rowPadding == 0) {
@@ -204,12 +204,20 @@ object DroneScannerManager {
                         cropped
                     }
 
+                    ownedBitmap = cleanBitmap
                     synchronized(bitmapLock) {
-                        latestBitmap?.recycle()
-                        latestBitmap = cleanBitmap
+                        if (captureToken == captureGeneration) {
+                            latestBitmap?.recycle()
+                            latestBitmap = cleanBitmap
+                            frameTime = now
+                            ownedBitmap = null
+                        }
                     }
-                } catch (e: Throwable) {
-                    android.util.Log.e("DroneScanner", "Frame acquisition error: ${e.message}", e)
+                } catch (e: Exception) {
+                    android.util.Log.e("DroneScanner", "Frame acquisition error", e)
+                } finally {
+                    image?.close()
+                    ownedBitmap?.let { if (!it.isRecycled) it.recycle() }
                 }
             }, bgHandler)
 
@@ -223,12 +231,14 @@ object DroneScannerManager {
                 null,
                 null
             )
-        } catch (e: Throwable) {
-            e.printStackTrace()
+        } catch (e: Exception) {
+            throw IllegalStateException("無法初始化擷取畫面", e)
         }
     }
 
     private fun releaseVirtualDisplay() {
+        synchronized(bitmapLock) { captureGeneration++; frameTime = 0L }
+        lastFrameTime = 0L
         virtualDisplay?.release()
         virtualDisplay = null
         imageReader?.close()
@@ -276,9 +286,6 @@ object DroneScannerManager {
     private var currentDwellSeconds: Float = 2.8f
     private var currentStartIndex: Int = 0
 
-    // 當次巡檢已記錄之蘑菇庫 (避免相鄰航點看見同一顆菇時重複跳出警報)
-    private val foundMushroomsThisSession = mutableListOf<DiscoveredMushroomRecord>()
-
     /**
      * 啟動無人機螺旋巡弋掃描 (從頭開始)
      */
@@ -291,9 +298,7 @@ object DroneScannerManager {
         dwellSeconds: Float = 2.8f,
         stepMeters: Double = 300.0
     ) {
-        synchronized(foundMushroomsThisSession) {
-            foundMushroomsThisSession.clear()
-        }
+        if (targetTypes.isEmpty()) { fail("請至少選擇一種目標"); return }
 
         val waypoints = DronePathGenerator.generateSpiralWaypoints(
             centerLat = centerLat,
@@ -321,7 +326,6 @@ object DroneScannerManager {
      */
     fun resumeScan(context: Context) {
         if (currentWaypoints.isEmpty() || currentStartIndex >= currentWaypoints.size) {
-            currentStartIndex = 0
             Toast.makeText(context, "已無剩餘巡弋點，請開啟面板重新設定半徑！", Toast.LENGTH_SHORT).show()
             return
         }
@@ -359,37 +363,6 @@ object DroneScannerManager {
         return LocationPoint(estLat, estLng)
     }
 
-    /**
-     * 檢查此目標蘑菇是否已在當次巡航中被發現並提醒過
-     * 同種類蘑菇距離 180m 內視為同一顆；不同種類則需相距 50m 內才視為同一實體
-     */
-    private fun isAlreadyDiscovered(estimatedLoc: LocationPoint, type: MushroomType): Boolean {
-        synchronized(foundMushroomsThisSession) {
-            return foundMushroomsThisSession.any { past ->
-                val dist = calculateDistanceMeters(
-                    estimatedLoc.latitude, estimatedLoc.longitude,
-                    past.latitude, past.longitude
-                )
-                if (past.type == type) {
-                    dist < 180.0
-                } else {
-                    dist < 50.0
-                }
-            }
-        }
-    }
-
-    private fun calculateDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val r = 6371000.0 // 地球半徑 (公尺)
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
-                kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
-                kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
-        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-        return r * c
-    }
-
     private fun startScanInternal(
         context: Context,
         waypoints: List<LocationPoint>,
@@ -397,132 +370,96 @@ object DroneScannerManager {
         targetTypes: Set<MushroomType>,
         dwellSeconds: Float
     ) {
-        stopScan()
-        acquireWakeLock(context)
-
-        val prefs = PreferencesRepo(context)
-        val startPoint = waypoints.getOrNull(startIndex) ?: waypoints.firstOrNull() ?: LocationPoint(0.0, 0.0)
-
-        // 確保 Mock 定位服務已就緒啟動
-        MockLocationService.start(context, startPoint)
-
-        _status.value = DroneScanStatus(
-            isScanning = true,
-            currentIndex = startIndex,
-            totalPoints = waypoints.size,
-            currentCoordinate = startPoint,
-            foundTarget = null,
-            foundLocation = null,
-            statusMessage = "🛸 無人機巡弋中 (${startIndex + 1}/${waypoints.size})..."
-        )
-
-        scanJob = scope.launch(Dispatchers.Default) {
-            val dwellMillis = (dwellSeconds * 1000).toLong().coerceAtLeast(1400L)
-            val initialDelay = if (dwellMillis <= 2200L) 900L else 1200L
-
-            var consecutiveNullFrames = 0
-
-            for (index in startIndex until waypoints.size) {
-                if (!isActive) break
-
-                val waypoint = waypoints[index]
-
-                withContext(Dispatchers.Main) {
-                    _status.value = _status.value.copy(
-                        currentIndex = index + 1,
-                        currentCoordinate = waypoint,
-                        statusMessage = "📍 巡弋點 ${index + 1}/${waypoints.size} (座標: ${String.format("%.4f, %.4f", waypoint.latitude, waypoint.longitude)})"
-                    )
-
-                    // 瞬移 GPS 座標至巡弋點
-                    prefs.lastLatitude = waypoint.latitude
-                    prefs.lastLongitude = waypoint.longitude
-                    MockLocationService.updateLocation(context, waypoint)
+        if (scanJob?.isActive == true) return
+        if (mediaProjection == null || virtualDisplay == null || !MockLocationService.isRunning.value) {
+            fail("定位或畫面尚未就緒，請重新授權後開始")
+            return
+        }
+        val appContext = context.applicationContext
+        val prefs = PreferencesRepo(appContext)
+        val captureToken = captureGeneration
+        acquireWakeLock(appContext)
+        _status.value = DroneScanStatus(phase = ScanPhase.WAITING_FOR_FRAME, isScanning = true,
+            totalPoints = waypoints.size, currentIndex = startIndex,
+            statusMessage = "請切換至遊戲地圖，3 秒後開始；請保持正北與固定縮放")
+        scanJob = scope.launch {
+            try {
+                delay(3000)
+                val readyAfter = SystemClock.elapsedRealtime()
+                withTimeout(5000) {
+                    while (true) {
+                        val frame = captureCurrentScreen(readyAfter)
+                        if (frame != null) { frame.bitmap.recycle(); break }
+                        delay(100)
+                    }
                 }
-
-                // 🌟 連續動態採樣窗口：克服 Pikmin Bloom 伺服器載入 3D 蘑菇延遲問題
-                delay(initialDelay)
-
-                val startTime = System.currentTimeMillis()
-                var foundMushroom: Pair<DetectedMushroom, LocationPoint>? = null
-                var capturedFramesAtThisPoint = 0
-
-                // 在停留窗口內動態採樣，檢查是否有當次未發現過的新蘑菇
-                while (System.currentTimeMillis() - startTime < (dwellMillis - initialDelay) && isActive) {
-                    try {
-                        val capturedBitmap = captureCurrentScreen()
-                        if (capturedBitmap != null) {
-                            capturedFramesAtThisPoint++
-                            consecutiveNullFrames = 0
-                            val detected = MushroomDetector.detectMushrooms(capturedBitmap, targetTypes)
-                            
-                            // 排除當次巡航已發現過的同一顆蘑菇
-                            val newMushroom = detected.firstOrNull { m ->
-                                val estLoc = estimateMushroomLocation(waypoint, m)
-                                !isAlreadyDiscovered(estLoc, m.type)
-                            }
-                            if (newMushroom != null) {
-                                val estLoc = estimateMushroomLocation(waypoint, newMushroom)
-                                foundMushroom = Pair(newMushroom, estLoc)
-                                break // 成功捕捉到全新目標！立刻停止採樣
-                            }
+                for (index in startIndex until waypoints.size) {
+                    ensureActive()
+                    currentStartIndex = index // On interruption, retry the unanalysed waypoint.
+                    val waypoint = waypoints[index]
+                    check(MockLocationService.updateLocation(appContext, waypoint)) { "定位已停止" }
+                    _status.value = _status.value.copy(phase = ScanPhase.SCANNING, currentIndex = index + 1,
+                        currentCoordinate = waypoint, statusMessage = "正在分析航點 ${index + 1}/${waypoints.size}")
+                    delay(1200)
+                    val minimumFrameTime = SystemClock.elapsedRealtime()
+                    val deadline = minimumFrameTime + (dwellSeconds * 1000).toLong().coerceAtLeast(1400)
+                    var lastAnalysed = minimumFrameTime
+                    var analysedFrames = 0
+                    val confirmation = FrameConfirmation()
+                    var found: DetectedMushroom? = null
+                    while (SystemClock.elapsedRealtime() < deadline) {
+                        ensureActive()
+                        val frame = captureCurrentScreen(lastAnalysed)
+                        if (frame != null) {
+                            lastAnalysed = frame.time
+                            val detected = try {
+                                withContext(Dispatchers.Default) { MushroomDetector.detectMushrooms(frame.bitmap, targetTypes) }
+                            } finally { frame.bitmap.recycle() }
+                            analysedFrames++
+                            found = confirmation.observe(frame.time, detected)
+                            if (found != null) break
                         }
-                    } catch (e: Throwable) {
-                        e.printStackTrace()
+                        delay(250)
                     }
-                    delay(250L)
+                    check(analysedFrames >= 3) { "未取得足夠的新畫面，搜尋已暫停，請確認遊戲畫面與擷取權限" }
+                    if (found != null) {
+                        currentStartIndex = index + 1
+                        onTargetDiscovered(appContext, found, waypoint, prefs)
+                        return@launch
+                    }
+                    currentStartIndex = index + 1
                 }
-
-                if (capturedFramesAtThisPoint == 0) {
-                    consecutiveNullFrames++
-                    if (consecutiveNullFrames == 2) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "⚠️ 尚未取得螢幕畫面（可能權限中斷），請確認啟動無人機時有允許「立即開始錄製螢幕」！", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-
-                if (!isActive) break
-
-                if (foundMushroom != null) {
-                    val (bestTarget, estLoc) = foundMushroom
-                    synchronized(foundMushroomsThisSession) {
-                        foundMushroomsThisSession.add(
-                            DiscoveredMushroomRecord(bestTarget.type, estLoc.latitude, estLoc.longitude)
-                        )
-                    }
-                    currentStartIndex = index + 1 // 下次繼續時從下一點開始！
-                    withContext(Dispatchers.Main) {
-                        // 發現目標！
-                        onTargetDiscovered(context, bestTarget, estLoc, prefs)
-                    }
-                    break // 發現目標立即停止巡航，鎖定座標！
-                }
-            }
-
-            withContext(Dispatchers.Main) {
-                if (_status.value.foundTarget == null) {
-                    currentStartIndex = 0 // 巡弋結束重置起點
-                    _status.value = _status.value.copy(
-                        isScanning = false,
-                        statusMessage = "✅ 本輪網格巡弋完畢，已無更多目標"
-                    )
-                    Toast.makeText(context, "✅ 無人機巡弋完畢！", Toast.LENGTH_SHORT).show()
+                _status.value = _status.value.copy(phase = ScanPhase.COMPLETED, isScanning = false,
+                    statusMessage = "本輪分析完成，未找到更多符合條件的候選目標")
+            } catch (e: TimeoutCancellationException) {
+                _status.value = _status.value.copy(phase = ScanPhase.ERROR, isScanning = false,
+                    statusMessage = "沒有新的遊戲畫面，請重新授權後續航")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _status.value = _status.value.copy(phase = ScanPhase.ERROR, isScanning = false,
+                    statusMessage = e.localizedMessage ?: "巡航失敗")
+                Toast.makeText(appContext, _status.value.statusMessage, Toast.LENGTH_LONG).show()
+            } finally {
+                if (captureGeneration == captureToken) {
+                    releaseWakeLock()
+                    releaseCapture()
                 }
             }
         }
     }
 
-    private fun captureCurrentScreen(): Bitmap? {
-        synchronized(bitmapLock) {
-            val current = latestBitmap ?: return null
-            if (current.isRecycled) return null
-            return try {
-                current.copy(Bitmap.Config.ARGB_8888, false)
-            } catch (e: Throwable) {
-                null
-            }
-        }
+    private data class CapturedFrame(val bitmap: Bitmap, val time: Long)
+    private fun captureCurrentScreen(after: Long): CapturedFrame? = synchronized(bitmapLock) {
+        val current = latestBitmap ?: return@synchronized null
+        if (current.isRecycled || frameTime <= after || SystemClock.elapsedRealtime() - frameTime > 1000) return@synchronized null
+        CapturedFrame(current.copy(Bitmap.Config.ARGB_8888, false), frameTime)
+    }
+
+    fun fail(message: String) {
+        stopScan()
+        _status.value = _status.value.copy(phase = ScanPhase.ERROR, foundTarget = null, foundLocation = null,
+            estimatedLocation = null, statusMessage = message)
     }
 
     private fun onTargetDiscovered(
@@ -534,17 +471,19 @@ object DroneScannerManager {
         val label = MushroomType.getDisplayName(target.type)
 
         _status.value = _status.value.copy(
+            phase = ScanPhase.FOUND,
             isScanning = false,
             foundTarget = target,
             foundLocation = location,
-            statusMessage = "🎯 成功發現【$label】！已自動鎖定座標！"
+            estimatedLocation = estimateMushroomLocation(location, target),
+            statusMessage = "發現候選【$label】，已停在觀測航點；請在遊戲內確認種類與大小"
         )
 
-        // 🌟 核心修復：立即將 Mock GPS 定位精確鎖定至蘑菇估算座標，並更新最後定位與歷史紀錄
+        // Keep the observation waypoint. An uncalibrated pixel estimate must not trigger a teleport.
         prefs.lastLatitude = location.latitude
         prefs.lastLongitude = location.longitude
         MockLocationService.updateLocation(context, location)
-        prefs.addHistory(location.latitude, location.longitude, "🎯 發現 $label")
+        prefs.addHistory(location.latitude, location.longitude, "候選觀測點 $label")
 
         // 1. 手機多段強震動提示
         try {
@@ -566,7 +505,7 @@ object DroneScannerManager {
         try {
             Toast.makeText(
                 context,
-                "🎉 找到了！無人機發現【$label】！\n已將 GPS 定位鎖定在此處！",
+                "🎉 找到了！無人機發現【$label】！\n已停在觀測航點，請確認目標！",
                 Toast.LENGTH_LONG
             ).show()
         } catch (e: Exception) {
@@ -595,28 +534,19 @@ object DroneScannerManager {
             }
 
             val openAppIntent = Intent(context, MainActivity::class.java).apply {
+                action = "com.pikmin.fakegps.OPEN_DRONE"
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
-                0,
+                3001,
                 openAppIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val resumeIntent = Intent(context, MockLocationService::class.java).apply {
-                action = MockLocationService.ACTION_RESUME_DRONE_SCAN
-            }
-            val resumePendingIntent = PendingIntent.getService(
-                context,
-                102,
-                resumeIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
             val notification = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle("🎯 發現目標蘑菇！【$label】")
-                .setContentText("座標已鎖定 (${String.format("%.5f, %.5f", location.latitude, location.longitude)})，無人機已自動煞車停下！")
+                .setContentText("停在觀測航點 (${String.format(java.util.Locale.US, "%.5f, %.5f", location.latitude, location.longitude)})，無人機已自動煞車停下！")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_EVENT)
                 .setSound(null) // 🔇 不響鈴
@@ -624,8 +554,8 @@ object DroneScannerManager {
                 .setContentIntent(pendingIntent)
                 .addAction(
                     android.R.drawable.ic_media_play,
-                    "⏩ 繼續搜尋下一顆菇",
-                    resumePendingIntent
+                    "開啟面板並重新授權續航",
+                    pendingIntent
                 )
                 .setAutoCancel(true)
                 .build()
@@ -640,20 +570,25 @@ object DroneScannerManager {
         scanJob?.cancel()
         scanJob = null
         releaseWakeLock()
-        _status.value = _status.value.copy(
-            isScanning = false,
-            statusMessage = "無人機已停止"
-        )
+        releaseCapture()
+        _status.value = _status.value.copy(phase = ScanPhase.PAUSED, isScanning = false,
+            statusMessage = "巡航已停止，定位保持在目前位置；續航需重新授權畫面")
+    }
+
+    private fun releaseCapture() {
+        val projection = mediaProjection
+        mediaProjection = null
+        projectionCallback?.let { callback -> runCatching { projection?.unregisterCallback(callback) } }
+        projectionCallback = null
+        releaseVirtualDisplay()
+        runCatching { projection?.stop() }
+        MockLocationService.disableMediaProjection()
     }
 
     fun release() {
         stopScan()
-        releaseVirtualDisplay()
-        try {
-            mediaProjection?.stop()
-            mediaProjection = null
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        currentWaypoints = emptyList()
+        currentStartIndex = 0
+        _status.value = DroneScanStatus()
     }
 }

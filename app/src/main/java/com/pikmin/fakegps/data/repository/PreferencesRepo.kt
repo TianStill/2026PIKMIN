@@ -8,6 +8,10 @@ import com.pikmin.fakegps.data.model.MovementMode
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.security.MessageDigest
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
 
 class PreferencesRepo(context: Context) {
 
@@ -15,6 +19,7 @@ class PreferencesRepo(context: Context) {
         context.getSharedPreferences("fake_gps_preferences", Context.MODE_PRIVATE)
 
     companion object {
+        private var clipboardHash: String? = null
         private const val KEY_LAST_LAT = "key_last_lat"
         private const val KEY_LAST_LNG = "key_last_lng"
         private const val KEY_LAST_ZOOM = "key_last_zoom"
@@ -74,9 +79,27 @@ class PreferencesRepo(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_CLIPBOARD, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_CLIPBOARD, value).apply()
 
-    var lastProcessedClipboard: String
-        get() = prefs.getString(KEY_LAST_CLIPBOARD, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_LAST_CLIPBOARD, value).apply()
+    init {
+        // Migrate old plaintext clipboard data; hashes are session-only and excluded from backup.
+        prefs.edit().remove(KEY_LAST_CLIPBOARD).apply()
+    }
+
+    fun hasProcessedClipboard(text: String): Boolean = clipboardHash == hash(text)
+    fun markClipboardProcessed(text: String) { clipboardHash = hash(text) }
+    private fun hash(text: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(text.trim().toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    fun saveLocation(latitude: Double, longitude: Double) {
+        prefs.edit().putString(KEY_LAST_LAT, latitude.toString())
+            .putString(KEY_LAST_LNG, longitude.toString()).apply()
+    }
+
+    val changes = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> trySend(Unit) }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(Unit)
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }.conflate()
 
     var overlayX: Int
         get() = prefs.getInt("key_overlay_x", 80)

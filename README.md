@@ -1,109 +1,43 @@
-# Fake GPS Pro - Android 原生模擬定位與皮克敏巡航應用程式
+# Fake GPS Pro
 
-一款基於 **Android 原生 (Kotlin + Jetpack Compose)** 開發的虛擬定位（Fake GPS）應用程式，專為地圖定位測試、Pikmin Bloom (皮克敏) 巡弋與遊戲模擬設計。
+Android 原生模擬定位與遊戲畫面候選辨識工具，使用 Kotlin、Jetpack Compose、osmdroid、Android LocationManager 與 MediaProjection。最低 Android 8.0（API 26），版本資訊以 `app/build.gradle.kts` 為準。
 
----
+## 功能
 
-## 🌟 核心特色功能清單
+- 地图選點、地名搜尋、經緯度輸入、中文混合文字座標解析。
+- GPS 與 Network 測試提供者每秒更新；可選擇不超過 0.4m 的隨機半徑抖動。這不是高斯分布，也不代表模擬位置不可被辨識。
+- 收藏、最近三筆歷史、四種地圖圖層與縮放儲存。
+- 回到 APP 後可自動套用剪貼簿座標（預設開啟，可關閉）；巡航期間不自動套用。只保存本次程序的剪貼簿雜湊，不保存整段原文。
+- 螺旋航點掃描，逐點移動後等待並分析畫面；三張不同影格一致時停在觀測航點，提醒使用者確認。
+- 相片辨識測試、GitHub 更新檢查、驗證下載後由使用者確認安裝。
 
-1. **底層模擬定位引擎 (`MockLocationEngine`)**：
-   - 註冊 Android 系統測試提供者 (`GPS_PROVIDER` 與 `NETWORK_PROVIDER`)。
-   - 注入完整模擬衛星訊號（經度、緯度、精準度、速度、方位角 Bearing、時間戳記、海拔高度）。
-   - **擬真微幅飄移 (Realistic Jitter)**：內建高斯雜訊演算法（$\pm 0.4\text{ m}$），模擬真實硬體天線訊號波動，避免被遊戲防作弊偵測判定為絕對靜止假訊號。
+## 使用
 
-2. **背景常駐前台服務 (`MockLocationService`)**：
-   - 透過 Android 系統前台服務 (`Foreground Service`)，綁定 `location | mediaProjection` 類型。
-   - 搭配狀態列常駐通知與 WakeLock，確保切換至 Pikmin Bloom 遊戲或背景待機時定位永不中斷。
+1. 授予定位權限，並在 Android「開發人員選項 → 選取模擬位置資訊應用程式」選取本 APP。
+2. 選取地點後按「開始模擬」。正在模擬時手動選點會更新定位；若巡航中手動選點，會先停止巡航。
+3. 啟動掃描時必須授予螢幕擷取。切換至直向遊戲地圖，維持正北及固定縮放。取消授權不會啟動巡航。
+4. 「停止無人機」保持定位在目前航點；主畫面或通知「停止全部」停止巡航、擷取及定位。
+5. 續航會重新請求畫面授權，避免重用失效的擷取 token。
 
-3. **無人機自動巡航與蘑菇辨識 (`DroneScanner` & `CV Detector`)**：
-   - **無人機自動巡弋路徑 (`DronePathGenerator`)**：支援從中心點向外擴散的自動搜尋飛行航線。
-   - **無人機巡弋控制器 (`DroneScannerManager`)**：透過 `MediaProjection` 螢幕捕捉技術結合航向推進，實現全自動巡航。
-   - **畫面色彩與形狀辨識 (`MushroomDetector`)**：針對 Pikmin Bloom 地圖畫面特徵，自動分析偵測畫面中的蘑菇種類（紅、黃、藍、白、紫、羽、岩等）與所在座標。
-   - **專屬掃描控制面板 (`DroneScannerDialog`)**：設定巡弋半徑、搜尋步長與即時狀態監控。
+## 辨識限制
 
-4. **多圖資切換地圖介面 (`MapViewContainer` + `osmdroid`)**：
-   - 整合開源 **OpenStreetMap (osmdroid)**。
-   - **多種圖資自由切換 (`GoogleMapTileSources`)**：支援標準 OpenStreetMap、Google 街道圖 (Roadmap)、Google 衛星空照圖 (Satellite) 與地形圖 (Terrain)。
-   - 中心準心釘選座標、滑動與縮放即時聯動。
+辨識使用 HSV 色彩、連通區塊及幾何篩選。色彩符合度不是正確機率，種類與大型/巨大尺寸需在遊戲內確認。沒有真實截圖資料集驗證之前，不宣稱特定準確率或無盲區覆蓋。
 
-5. **搜尋與座標輸入 (`LocationSearchBar` & `InputCoordinatesDialog`)**：
-   - **地址與地名搜尋**：整合 Nominatim 線上地理編碼，支援中文地址、地標模糊搜尋。
-   - **精準數值輸入**：提供專屬座標彈窗，直接輸入或微調經度、緯度。
+螢幕估算座標尚未校正：固定假設畫面寬度為 450m、玩家在高度 58%、正北。發現候選會停在**觀測航點**，不自動跳到估算位置。為避免錯誤排除鄰近目標，不使用原本 180m/50m 地理去重，可能在相鄰航點重複提醒。
 
-6. **切換 APP 自動剪貼簿辨識 (`Auto-Clipboard Detection`)**：
-   - **智慧座標過濾 (`ExtractedCoordinate`)**：自動從 LINE、Discord 聊天群組的混雜文字中辨識座標（例如「`60.4469650, 23.2501560 華麗 免3`」自動萃取有效經緯度）。
-   - **切換回 App 自動生效**：複製座標後切換回本 App 立即自動辨識並提供一鍵跳轉。
+## 資料與連線
 
-7. **書籤地點與歷史紀錄管理 (`FavoritesSheet` & `HistorySheet`)**：
-   - **常用地點收藏 (`FavoritesSheet`)**：一鍵儲存喜愛景點或常打蘑菇點，支援快速切換。
-   - **歷史移動紀錄 (`HistorySheet`)**：自動保留近期傳送點歷史軌跡。
+地名搜尋連線至 Nominatim，地圖瓦片連線至所選圖資來源，更新查詢連線至 GitHub。畫面辨識在本機完成。收藏、歷史與偏好設定納入 Android 系統備份；定位恢復狀態不納入備份。Google 圖層使用既有瓦片網址，其可用性仍取決於提供者。
 
----
+## 開發與驗證
 
-## 📱 使用與設定指引
+主要路徑 `D:\2026PIKMIN`，JDK 17。
 
-### 步驟 1：開啟手機「開發人員選項」並指定模擬 App
-1. 進入手機 **「設定」** $\to$ **「關於手機」** $\to$ 連續點擊 **「版本號碼」** 7 次直到提示開啟開發人員模式。
-2. 返回設定，進入 **「系統」** $\to$ **「開發人員選項」**。
-3. 找到 **「選取模擬位置資訊應用程式」**（Select mock location app），點選並指定為 **「Fake GPS Pro」**。
-
-### 步驟 2：開始模擬與巡航
-1. 在地圖上拖曳準心、搜尋目的地或直接輸入經緯度。
-2. 點擊畫面上的 **「開始模擬」** 按鈕，狀態列將顯示常駐通知。
-3. 可開啟 **無人機巡弋（Drone Scanner）** 進行大範圍蘑菇偵測與自動航行。
-4. 切換至目標應用程式（例如 Pikmin Bloom / 地圖導航），即可享受擬真的位置更新！
-
----
-
-## 📂 專案架構概覽
-
-```
-app/src/main/
-├── AndroidManifest.xml                  // 系統權限 (Location, MediaProjection) 與 Service 宣告
-├── java/com/pikmin/fakegps/
-│   ├── FakeGpsApplication.kt            // 全域 Application (通知管道與 OSM 設定)
-│   ├── cv/                              // 電腦視覺與蘑菇辨識模組
-│   │   ├── DetectedMushroom.kt          // 偵測到的蘑菇實體與座標
-│   │   ├── MushroomCategory.kt          // 蘑菇分類
-│   │   ├── MushroomDetector.kt          // 畫面像素色彩辨識演算法
-│   │   └── MushroomType.kt              // 蘑菇顏色與種類定義
-│   ├── data/                            // 資料層
-│   │   ├── model/BookmarkPoint.kt       // 書籤收藏資料模型
-│   │   ├── model/LocationHistoryPoint.kt// 歷史紀錄資料模型
-│   │   ├── model/LocationPoint.kt       // 基礎經緯度模型
-│   │   ├── model/MovementMode.kt        // 移動速度模式
-│   │   └── repository/PreferencesRepo.kt// 偏好設定、書籤與歷史持久化儲存
-│   ├── drone/                           // 無人機自動巡弋模組
-│   │   ├── DronePathGenerator.kt        // 螺旋與網格巡航航線推算
-│   │   ├── DroneScannerManager.kt       // 巡弋生命週期與截圖偵測整合
-│   │   └── DroneScanStatus.kt           // 巡航狀態列舉
-│   ├── service/                         // 核心背景服務
-│   │   ├── MockLocationEngine.kt        // Android LocationManager 底層注入邏輯 (含 Jitter)
-│   │   └── MockLocationService.kt       // 前台常駐服務 (Foreground Service)
-│   ├── utils/                           // 通用工具類
-│   │   ├── ExtractedCoordinate.kt       // 剪貼簿群組文字智慧過濾正規表達式
-│   │   ├── GeoUtils.kt                  // 球面大圓公式、方位角與距離航位推算
-│   │   ├── GoogleMapTileSources.kt      // Google 衛星/街道/地形圖資定義
-│   │   ├── MapType.kt                   // 圖資模式列舉
-│   │   └── PermissionHelper.kt          // 開發者選項模擬位置與通知權限檢測
-│   └── ui/                              // Jetpack Compose 介面
-│       ├── MainActivity.kt              // 主畫面進入點與狀態聯動
-│       ├── viewmodel/MainViewModel.kt   // UI State、搜尋、巡航與服務控制器
-│       ├── components/                  // UI 元件
-│       │   ├── DroneScannerDialog.kt    // 無人機巡航與蘑菇掃描控制對話框
-│       │   ├── FavoritesSheet.kt        // 常用地點收藏抽屜
-│       │   ├── HistorySheet.kt          // 歷史傳送紀錄抽屜
-│       │   ├── InputCoordinatesDialog.kt// 經緯度數值直接輸入彈窗
-│       │   ├── LocationSearchBar.kt     // 地名/地址關鍵字搜尋欄
-│       │   └── MapViewContainer.kt      // osmdroid Compose 封裝與準心圖層
-│       └── theme/                       // Material 3 主題配色與字體配置
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot'
+.\gradlew.bat assembleDebug testDebugUnitTest lintDebug
 ```
 
----
+模組：`ui`/`ui.viewmodel`（畫面與狀態）、`service`（定位生命週期）、`drone`（擷取與航點控制）、`cv`（畫面辨識）、`data.repository`（偏好儲存）、`update`（驗證更新）。
 
-## 🛠️ 編譯與建置 (Build & Run)
-
-1. 使用 **Android Studio (Giraffe / Hedgehog / Iguana / Jellyfish 或更新版本)** 開啟此專案資料夾 `2026PIKMIN`。
-2. 等待 Gradle Sync 完成。
-3. 連接 Android 實體裝置 (開啟 USB 偵錯) 或啟動 Android 模擬器。
-4. 點擊 Android Studio 上方綠色的 **Run (Shift + F10)** 即可安裝執行。
+完整修正範圍、圖片資料格式、真機驗收、正式簽章與遷移限制見 [docs/VERIFICATION.md](docs/VERIFICATION.md)。一般修改不推進版本、不打 Tag、不發布 Release；需使用者明確批准後才可執行 `release.ps1 -ConfirmRelease`。

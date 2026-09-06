@@ -38,6 +38,11 @@ import com.pikmin.fakegps.update.UpdateUiState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import com.pikmin.fakegps.drone.DroneScannerManager
+import com.pikmin.fakegps.service.MockLocationService
 
 class MainActivity : ComponentActivity() {
 
@@ -52,12 +57,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkAndRequestPermissions()
+        if (intent?.action == "com.pikmin.fakegps.OPEN_DRONE") viewModel.openDronePanel.value = true
 
         setContent {
             FakeGPSTheme {
                 MainScreen(viewModel = viewModel)
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == "com.pikmin.fakegps.OPEN_DRONE") viewModel.openDronePanel.value = true
     }
 
     override fun onResume() {
@@ -119,6 +131,10 @@ data class DroneScanConfig(
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val uiScope = rememberCoroutineScope()
+    val serviceError by MockLocationService.error.collectAsState()
+    val zoom by viewModel.mapZoom.collectAsState()
+    LaunchedEffect(serviceError) { serviceError?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
     val targetLocation by viewModel.targetLocation.collectAsState()
     val isMocking by viewModel.isMocking.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
@@ -144,65 +160,54 @@ fun MainScreen(viewModel: MainViewModel) {
     var showCoordinatesDialog by remember { mutableStateOf(false) }
     var showLayerMenu by remember { mutableStateOf(false) }
     var showDroneDialog by remember { mutableStateOf(false) }
+    val openDronePanel by viewModel.openDronePanel.collectAsState()
+    LaunchedEffect(openDronePanel) {
+        if (openDronePanel) { showDroneDialog = true; viewModel.openDronePanel.value = false }
+    }
 
     var pendingScanParams by remember { mutableStateOf<DroneScanConfig?>(null) }
+    var pendingResume by remember { mutableStateOf(false) }
+    var authorizingScan by remember { mutableStateOf(false) }
+    var pendingSessionToken by remember { mutableStateOf<Long?>(null) }
+    var authorizationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    DisposableEffect(Unit) {
+        onDispose { authorizationJob?.cancel() }
+    }
     val mediaProjectionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
-            // Android 14+ 必須先啟動支援 MediaProjection 的 ForegroundService
-            com.pikmin.fakegps.service.MockLocationService.enableMediaProjection(context)
-
-            val resultCode = result.resultCode
-            val data = result.data!!
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                val ok = com.pikmin.fakegps.drone.DroneScannerManager.setupMediaProjection(context, resultCode, data)
-                if (!ok) {
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        com.pikmin.fakegps.drone.DroneScannerManager.setupMediaProjection(context, resultCode, data)
-                    }, 350L)
+        val config = pendingScanParams
+        val resume = pendingResume
+        val requestedSession = pendingSessionToken
+        pendingSessionToken = null
+        pendingScanParams = null
+        pendingResume = false
+        authorizingScan = false
+        if (requestedSession == null || requestedSession != MockLocationService.sessionToken) {
+            DroneScannerManager.fail("定位已停止或重新啟動，請重新申請掃描")
+        } else if (result.resultCode != android.app.Activity.RESULT_OK || result.data == null) {
+            DroneScannerManager.fail("已取消畫面授權，沒有啟動巡航")
+        } else if (config != null || resume) {
+            authorizationJob = uiScope.launch {
+                try {
+                    withTimeout(5000) { MockLocationService.isRunning.first { it } }
+                    if (requestedSession != MockLocationService.sessionToken) return@launch
+                    if (DroneScannerManager.setupMediaProjection(context, result.resultCode, result.data!!)) {
+                        if (resume) DroneScannerManager.resumeScan(context)
+                        else config?.let {
+                            DroneScannerManager.startScan(context, viewModel.targetLocation.value.latitude,
+                                viewModel.targetLocation.value.longitude, it.radiusKm, it.targetTypes,
+                                it.dwellSec, it.stepMeters)
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    DroneScannerManager.fail("定位尚未就緒，請先啟動定位再試")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DroneScannerManager.fail("無法開始掃描：${e.localizedMessage}")
                 }
-                pendingScanParams?.let { config ->
-                    com.pikmin.fakegps.drone.DroneScannerManager.startScan(
-                        context = context,
-                        centerLat = targetLocation.latitude,
-                        centerLng = targetLocation.longitude,
-                        radiusKm = config.radiusKm,
-                        targetTypes = config.targetTypes,
-                        dwellSeconds = config.dwellSec,
-                        stepMeters = config.stepMeters
-                    )
-                }
-            }, 350L)
-            Toast.makeText(context, "🛸 無人機已起飛！請切換至《Pikmin Bloom》遊戲畫面！", Toast.LENGTH_LONG).show()
-        } else {
-            // 若取消授權截圖，依然照常執行 GPS 網格巡弋
-            pendingScanParams?.let { config ->
-                com.pikmin.fakegps.drone.DroneScannerManager.startScan(
-                    context = context,
-                    centerLat = targetLocation.latitude,
-                    centerLng = targetLocation.longitude,
-                    radiusKm = config.radiusKm,
-                    targetTypes = config.targetTypes,
-                    dwellSeconds = config.dwellSec,
-                    stepMeters = config.stepMeters
-                )
             }
-            Toast.makeText(context, "🛸 無人機自走巡弋已啟動！請切換至遊戲！", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    LaunchedEffect(droneStatus.currentCoordinate) {
-        droneStatus.currentCoordinate?.let { loc ->
-            if (droneStatus.isScanning) {
-                viewModel.setTargetLocation(loc.latitude, loc.longitude)
-            }
-        }
-    }
-
-    LaunchedEffect(droneStatus.foundLocation) {
-        droneStatus.foundLocation?.let { loc ->
-            viewModel.setTargetLocation(loc.latitude, loc.longitude)
         }
     }
 
@@ -217,6 +222,8 @@ fun MainScreen(viewModel: MainViewModel) {
             // 1. 全螢幕互動地圖 (Google 高清圖資 / 衛星空照圖 / OSM，支援歷史 Pin 標記)
             MapViewContainer(
                 targetLocation = targetLocation,
+                initialZoom = zoom,
+                onZoomChanged = viewModel::setMapZoom,
                 mapType = mapType,
                 historyList = history,
                 onMapCenterChanged = { lat, lng ->
@@ -259,7 +266,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 ) {
                     IconButton(
                         onClick = {
-                            CoroutineScope(Dispatchers.Main).launch {
+                            uiScope.launch {
                                 AppUpdateManager.checkForUpdates(BuildConfig.VERSION_NAME, silentCheck = false)
                             }
                         },
@@ -479,7 +486,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "緯: ${String.format("%.6f", targetLocation.latitude)}  經: ${String.format("%.6f", targetLocation.longitude)}",
+                                text = "緯: ${String.format(java.util.Locale.US, "%.6f", targetLocation.latitude)}  經: ${String.format(java.util.Locale.US, "%.6f", targetLocation.longitude)}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
                             )
@@ -489,6 +496,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         Button(
                             onClick = {
                                 if (isMocking) {
+                                    authorizationJob?.cancel()
                                     viewModel.stopMocking()
                                 } else {
                                     viewModel.startMocking()
@@ -562,31 +570,35 @@ fun MainScreen(viewModel: MainViewModel) {
                     currentLat = targetLocation.latitude,
                     currentLng = targetLocation.longitude,
                     onStartDroneScan = { radiusKm, targetTypes, dwellSec, stepMeters ->
-                        showDroneDialog = false // 立即關閉對話框
-                        val mpManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                        pendingScanParams = DroneScanConfig(radiusKm, targetTypes, dwellSec, stepMeters)
-                        if (!isMocking) {
-                            viewModel.startMocking()
-                        }
-                        try {
-                            mediaProjectionLauncher.launch(mpManager.createScreenCaptureIntent())
-                        } catch (e: Exception) {
-                            // 系統若不支援螢幕截圖，直接以網格巡弋模式運作
-                            com.pikmin.fakegps.drone.DroneScannerManager.startScan(
-                                context = context,
-                                centerLat = targetLocation.latitude,
-                                centerLng = targetLocation.longitude,
-                                radiusKm = radiusKm,
-                                targetTypes = targetTypes,
-                                dwellSeconds = dwellSec,
-                                stepMeters = stepMeters
-                            )
-                            Toast.makeText(context, "🛸 無人機已起飛！請切換至《Pikmin Bloom》！", Toast.LENGTH_LONG).show()
+                        if (!authorizingScan && (isMocking || viewModel.startMocking())) {
+                            showDroneDialog = false
+                            pendingScanParams = DroneScanConfig(radiusKm, targetTypes, dwellSec, stepMeters)
+                            pendingResume = false
+                            pendingSessionToken = MockLocationService.sessionToken
+                            authorizingScan = true
+                            val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+                            try { mediaProjectionLauncher.launch(manager.createScreenCaptureIntent()) }
+                            catch (e: Exception) {
+                                authorizingScan = false
+                                pendingScanParams = null
+                                DroneScannerManager.fail("無法取得畫面授權：${e.localizedMessage}")
+                            }
                         }
                     },
                     onResumeDroneScan = {
-                        showDroneDialog = false
-                        com.pikmin.fakegps.drone.DroneScannerManager.resumeScan(context)
+                        if (!authorizingScan && (isMocking || viewModel.startMocking())) {
+                            showDroneDialog = false
+                            pendingResume = true
+                            pendingSessionToken = MockLocationService.sessionToken
+                            authorizingScan = true
+                            val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+                            try { mediaProjectionLauncher.launch(manager.createScreenCaptureIntent()) }
+                            catch (e: Exception) {
+                                authorizingScan = false
+                                pendingResume = false
+                                DroneScannerManager.fail("無法取得畫面授權：${e.localizedMessage}")
+                            }
+                        }
                     },
                     onStopDroneScan = {
                         com.pikmin.fakegps.drone.DroneScannerManager.stopScan()

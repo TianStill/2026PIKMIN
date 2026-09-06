@@ -18,6 +18,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +49,8 @@ fun DroneScannerDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var testing by remember { mutableStateOf(false) }
     val scanStatus by DroneScannerManager.status.collectAsState()
 
     var selectedRadiusKm by remember { mutableStateOf(1.5) }
@@ -58,11 +64,18 @@ fun DroneScannerDialog(
     var testDetections by remember { mutableStateOf<List<DetectedMushroom>?>(null) }
     var showTestResultDialog by remember { mutableStateOf(false) }
 
+    DisposableEffect(testBitmap) {
+        val bitmap = testBitmap
+        onDispose { bitmap?.recycle() }
+    }
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
+          scope.launch {
+            testing = true
             try {
+              val (previewBitmap, detections) = withContext(Dispatchers.Default) {
                 val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     val source = ImageDecoder.createSource(context.contentResolver, uri)
                     ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
@@ -74,14 +87,19 @@ fun DroneScannerDialog(
                 }
 
                 val targetsToTest = if (selectedTypes.isNotEmpty()) selectedTypes else MushroomType.ALL_TARGETS
-                val detections = MushroomDetector.detectMushrooms(bitmap, targetsToTest)
-                val previewBitmap = MushroomDetector.drawDetectionPreview(bitmap, detections)
+                try {
+                    val detections = MushroomDetector.detectMushrooms(bitmap, targetsToTest)
+                    MushroomDetector.drawDetectionPreview(bitmap, detections) to detections
+                } finally { bitmap.recycle() }
+              }
                 testBitmap = previewBitmap
                 testDetections = detections
                 showTestResultDialog = true
+            } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 Toast.makeText(context, "讀取相片失敗：${e.message}", Toast.LENGTH_SHORT).show()
-            }
+            } finally { testing = false }
+          }
         }
     }
 
@@ -98,7 +116,7 @@ fun DroneScannerDialog(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text("🛸 無人機尋菇雷達", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                    Text("專屬鎖定：巨大活動菇、大顏色菇、大元素菇", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Text("色彩候選辨識；種類與大小需在遊戲內確認", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                 }
             }
         },
@@ -161,7 +179,7 @@ fun DroneScannerDialog(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "已鎖定目標蘑菇！",
+                                    text = "發現候選目標，已停在觀測點",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF16A34A)
@@ -175,7 +193,7 @@ fun DroneScannerDialog(
                             )
                             scanStatus.foundLocation?.let { loc ->
                                 Text(
-                                    text = "座標：${String.format("%.6f, %.6f", loc.latitude, loc.longitude)}",
+                                    text = "觀測航點：${String.format(java.util.Locale.US, "%.6f, %.6f", loc.latitude, loc.longitude)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.outline
                                 )
@@ -194,6 +212,16 @@ fun DroneScannerDialog(
                     }
                 }
 
+                if (!scanStatus.isScanning && scanStatus.foundTarget == null) {
+                    Text(scanStatus.statusMessage, style = MaterialTheme.typography.bodySmall)
+                    if (DroneScannerManager.hasRemainingPoints) {
+                        OutlinedButton(onClick = onResumeDroneScan) { Text("重新授權並從中斷航點續航") }
+                    }
+                }
+                scanStatus.estimatedLocation?.let { estimate ->
+                    Text("未校正估算：${String.format(java.util.Locale.US, "%.5f, %.5f", estimate.latitude, estimate.longitude)}；不自動跳轉，誤差尚未量測",
+                        style = MaterialTheme.typography.bodySmall)
+                }
                 // 2. 搜尋半徑選擇 (Radius)
                 Column {
                     Text("📍 巡弋半徑範圍", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -426,7 +454,7 @@ fun DroneScannerDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("⏱️ 每點等待時間 (微調)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text("${String.format("%.1f", dwellSeconds)} 秒", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Text("${String.format(java.util.Locale.US, "%.1f", dwellSeconds)} 秒", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                     Slider(
                         value = dwellSeconds,
@@ -449,7 +477,7 @@ fun DroneScannerDialog(
                         Text(text = "🧭", fontSize = 20.sp)
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "貼心提醒：啟動巡航前，請先點擊遊戲畫面中的「指南針」圖示將地圖回正為正北，以確保發現目標時換算之經緯度座標最為精確！",
+                            text = "貼心提醒：啟動巡航前，請先點擊遊戲畫面中的「指南針」圖示將地圖回正為正北，估算假設畫面寬度代表 450 公尺，尚未校正。發現候選後停在觀測航點，請自行確認。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                             lineHeight = 16.sp
@@ -462,6 +490,7 @@ fun DroneScannerDialog(
                 // 6. 圖片辨識測試工具
                 OutlinedButton(
                     onClick = { photoPickerLauncher.launch("image/*") },
+                    enabled = !testing,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -549,7 +578,7 @@ fun DroneScannerDialog(
                     )
 
                     testDetections?.forEach { m ->
-                        Text("• ${m.type.title} - 信賴度 ${(m.confidence * 100).toInt()}%")
+                        Text("• ${m.type.title} - 色彩符合度 ${(m.confidence * 100).toInt()}%（非正確機率；大小未確認）")
                     }
                 }
             },

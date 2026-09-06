@@ -147,7 +147,7 @@ fun UpdateDialog(
                         }
 
                         if (release.apkSize > 0) {
-                            val sizeMb = String.format("%.1f", release.apkSize.toFloat() / (1024 * 1024))
+                            val sizeMb = String.format(java.util.Locale.US, "%.1f", release.apkSize.toFloat() / (1024 * 1024))
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = "檔案大小: 約 $sizeMb MB",
@@ -172,12 +172,7 @@ fun UpdateDialog(
 
                             Button(
                                 onClick = {
-                                    CoroutineScope(Dispatchers.Main).launch {
-                                        val apk = AppUpdateManager.downloadApk(context, release)
-                                        if (apk != null) {
-                                            AppUpdateManager.installApk(context, apk)
-                                        }
-                                    }
+                                    AppUpdateManager.startDownload(context, release)
                                 },
                                 modifier = Modifier.weight(1.3f),
                                 shape = RoundedCornerShape(12.dp)
@@ -190,8 +185,8 @@ fun UpdateDialog(
                     is UpdateUiState.Downloading -> {
                         val dl = updateState
                         val percent = (dl.progress * 100).toInt()
-                        val downloadedMb = String.format("%.1f", dl.downloadedBytes.toFloat() / (1024 * 1024))
-                        val totalMb = if (dl.totalBytes > 0) String.format("%.1f", dl.totalBytes.toFloat() / (1024 * 1024)) else "--"
+                        val downloadedMb = String.format(java.util.Locale.US, "%.1f", dl.downloadedBytes.toFloat() / (1024 * 1024))
+                        val totalMb = if (dl.totalBytes > 0) String.format(java.util.Locale.US, "%.1f", dl.totalBytes.toFloat() / (1024 * 1024)) else "--"
 
                         Icon(
                             imageVector = Icons.Default.CloudDownload,
@@ -224,7 +219,7 @@ fun UpdateDialog(
 
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "下載完成後將自動跳出安裝確認視窗",
+                            text = "下載完成並通過驗證後，請點選安裝；未知來源授權後請返回重試",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

@@ -1,7 +1,6 @@
 package com.pikmin.fakegps.service
 
 import android.content.Context
-import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
 import android.location.provider.ProviderProperties
@@ -23,7 +22,7 @@ class MockLocationEngine(private val context: Context) {
     }
 
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    private val coroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val coroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var mockJob: Job? = null
 
     private val _currentLocation = MutableStateFlow<LocationPoint?>(null)
@@ -31,6 +30,9 @@ class MockLocationEngine(private val context: Context) {
 
     private val _isMocking = MutableStateFlow(false)
     val isMocking: StateFlow<Boolean> = _isMocking.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error = _error.asStateFlow()
 
     var enableJitter: Boolean = true
 
@@ -43,8 +45,11 @@ class MockLocationEngine(private val context: Context) {
             return
         }
 
+        validate(initialLocation)
+        _error.value = null
         try {
             setupTestProviders()
+            pushLocationToSystem(initialLocation)
             _currentLocation.value = initialLocation
             _isMocking.value = true
 
@@ -52,21 +57,27 @@ class MockLocationEngine(private val context: Context) {
             mockJob?.cancel()
             mockJob = coroutineScope.launch {
                 while (isActive && _isMocking.value) {
+                    delay(1000L)
                     val point = _currentLocation.value
                     if (point != null) {
-                        pushLocationToSystem(point)
+                        try {
+                            pushLocationToSystem(point)
+                        } catch (e: Exception) {
+                            stopMocking()
+                            _error.value = "定位訊號注入失敗：${e.localizedMessage}"
+                            break
+                        }
                     }
-                    delay(1000L)
                 }
             }
             Log.i(TAG, "Mocking started at: ${initialLocation.latitude}, ${initialLocation.longitude}")
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException: 尚未在開發人員選項中設定此 App 為模擬位置程式", e)
-            _isMocking.value = false
+            stopMocking()
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start mock location", e)
-            _isMocking.value = false
+            stopMocking()
             throw e
         }
     }
@@ -75,12 +86,10 @@ class MockLocationEngine(private val context: Context) {
      * 即時更新座標（由地圖點擊或搖桿移動觸發）
      */
     fun updateLocation(newPoint: LocationPoint) {
+        validate(newPoint)
+        check(_isMocking.value) { "定位已停止" }
+        pushLocationToSystem(newPoint)
         _currentLocation.value = newPoint
-        if (_isMocking.value) {
-            coroutineScope.launch {
-                pushLocationToSystem(newPoint)
-            }
-        }
     }
 
     /**
@@ -126,8 +135,8 @@ class MockLocationEngine(private val context: Context) {
                         true,  // supportsAltitude
                         true,  // supportsSpeed
                         true,  // supportsBearing
-                        Criteria.POWER_LOW,
-                        Criteria.ACCURACY_FINE
+                        ProviderProperties.POWER_USAGE_LOW,
+                        ProviderProperties.ACCURACY_FINE
                     )
                 }
                 locationManager.setTestProviderEnabled(provider, true)
@@ -160,6 +169,7 @@ class MockLocationEngine(private val context: Context) {
         val currentTime = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
 
+        var failures = 0
         for (provider in PROVIDERS) {
             try {
                 val mockLocation = Location(provider).apply {
@@ -180,8 +190,20 @@ class MockLocationEngine(private val context: Context) {
                 }
                 locationManager.setTestProviderLocation(provider, mockLocation)
             } catch (e: Exception) {
+                failures++
                 Log.e(TAG, "Failed to set test provider location for $provider: ${e.message}")
             }
         }
+        check(failures == 0) { "無法更新所有定位提供者，請檢查模擬位置權限" }
     }
+    fun release() {
+        stopMocking()
+        coroutineScope.cancel()
+    }
+
+    private fun validate(point: LocationPoint) {
+        require(point.latitude.isFinite() && point.latitude in -90.0..90.0 &&
+            point.longitude.isFinite() && point.longitude in -180.0..180.0) { "座標超出有效範圍" }
+    }
+
 }

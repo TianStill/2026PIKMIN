@@ -22,14 +22,16 @@ object DronePathGenerator {
         radiusKm: Double,
         stepMeters: Double = 360.0
     ): List<LocationPoint> {
+        require(centerLat.isFinite() && centerLat in -85.0..85.0) { "巡航緯度需介於 -85 與 85 度" }
+        require(centerLng.isFinite() && centerLng in -180.0..180.0) { "經度超出範圍" }
+        require(radiusKm.isFinite() && radiusKm in 0.1..3.0) { "半徑需介於 0.1 與 3 公里" }
+        require(stepMeters.isFinite() && stepMeters in 100.0..1000.0) { "航點間距需介於 100 與 1000 公尺" }
         val waypoints = mutableListOf<LocationPoint>()
 
         // 1. 第 0 點為中心起點
         waypoints.add(LocationPoint(latitude = centerLat, longitude = centerLng))
 
         val maxRadiusMeters = radiusKm * 1000.0
-        val metersPerLat = 111132.954 // 每緯度約公尺數
-        val metersPerLng = 111132.954 * cos(Math.toRadians(centerLat))
 
         // 阿基米德螺旋參數
         // r = a + b * theta
@@ -40,11 +42,10 @@ object DronePathGenerator {
 
         while (currentRadius <= maxRadiusMeters) {
             // 計算目前角度與半徑下的相對位移 (公尺)
-            val dx = currentRadius * sin(theta) // 東西向 (經度)
-            val dy = currentRadius * cos(theta) // 南北向 (緯度)
 
-            val pointLat = centerLat + (dy / metersPerLat)
-            val pointLng = centerLng + (dx / metersPerLng)
+            val (pointLat, pointLng) = com.pikmin.fakegps.utils.GeoUtils.calculateNextCoordinate(
+                centerLat, centerLng, currentRadius.toFloat(), Math.toDegrees(theta).toFloat(), 1.0
+            )
 
             waypoints.add(
                 LocationPoint(

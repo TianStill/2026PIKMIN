@@ -166,7 +166,7 @@ fun HistorySheet(
                                             )
                                         }
                                         Text(
-                                            text = "緯: ${String.format("%.6f", item.latitude)}  經: ${String.format("%.6f", item.longitude)}",
+                                            text = "緯: ${String.format(java.util.Locale.US, "%.6f", item.latitude)}  經: ${String.format(java.util.Locale.US, "%.6f", item.longitude)}",
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (item.note.isBlank()) FontWeight.SemiBold else FontWeight.Normal,
                                             color = if (item.note.isBlank()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline

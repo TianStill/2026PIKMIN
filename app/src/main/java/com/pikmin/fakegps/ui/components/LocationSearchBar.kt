@@ -135,7 +135,7 @@ fun LocationSearchBar(
                                     maxLines = 2
                                 )
                                 Text(
-                                    text = String.format("%.5f, %.5f", result.latitude, result.longitude),
+                                    text = String.format(java.util.Locale.US, "%.5f, %.5f", result.latitude, result.longitude),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.outline
                                 )
