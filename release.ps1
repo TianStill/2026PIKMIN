@@ -54,7 +54,7 @@ try {
     if ($remote -notin @('https://github.com/TianStill/2026PIKMIN.git', 'git@github.com:TianStill/2026PIKMIN.git')) { throw "Unexpected release repository." }
     gh auth status
     Assert-Exit 'GitHub authentication'
-    git fetch origin main --tags
+    git fetch origin main:refs/remotes/origin/main --tags
     Assert-Exit 'Fetch main'
     $behind = git rev-list --count HEAD..origin/main
     Assert-Exit 'Check remote history'
