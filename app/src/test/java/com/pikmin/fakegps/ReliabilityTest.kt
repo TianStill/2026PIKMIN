@@ -5,6 +5,8 @@ import com.pikmin.fakegps.drone.*
 import com.pikmin.fakegps.service.SessionGate
 import com.pikmin.fakegps.update.*
 import com.pikmin.fakegps.utils.GeoUtils
+import com.pikmin.fakegps.data.model.DiscoveredMushroomPoint
+import com.pikmin.fakegps.data.model.LocationPoint
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -60,6 +62,31 @@ class ReliabilityTest {
         val tracker = FrameConfirmation()
         tracker.observe(100, listOf(candidate())); tracker.observe(350, listOf(candidate()))
         assertNull(tracker.observe(600, listOf(candidate(500))))
+    }
+    @Test fun previouslyFoundSameTypeNearbyIsSuppressed() {
+        val known = listOf(DiscoveredMushroomPoint(MushroomType.LARGE_RED.name, 25.0, 121.0))
+        val nearby = LocationPoint(25.0005, 121.0)
+        assertTrue(DroneScannerManager.wasPreviouslyFound(MushroomType.LARGE_RED, nearby, known))
+    }
+    @Test fun differentTypeOrDistantCandidateIsNotSuppressed() {
+        val known = listOf(DiscoveredMushroomPoint(MushroomType.LARGE_RED.name, 25.0, 121.0))
+        assertFalse(DroneScannerManager.wasPreviouslyFound(MushroomType.LARGE_BLUE, LocationPoint(25.0005, 121.0), known))
+        assertFalse(DroneScannerManager.wasPreviouslyFound(MushroomType.LARGE_RED, LocationPoint(25.003, 121.0), known))
+    }
+    @Test fun yellowStemBelowRedCapIsNotReportedAsYellowMushroom() {
+        val redCap = DetectedMushroom(MushroomType.LARGE_RED, 300, 300, 60, 0.8f)
+        val yellowStem = DetectedMushroom(MushroomType.LARGE_YELLOW, 305, 360, 50, 0.9f)
+        assertEquals(listOf(redCap), MushroomDetector.removeKnownStemFalsePositives(listOf(redCap, yellowStem)))
+    }
+    @Test fun standaloneYellowCandidateRemainsDetectable() {
+        val yellow = DetectedMushroom(MushroomType.LARGE_YELLOW, 300, 300, 50, 0.9f)
+        val distantRed = DetectedMushroom(MushroomType.LARGE_RED, 500, 250, 40, 0.8f)
+        assertEquals(listOf(yellow, distantRed), MushroomDetector.removeKnownStemFalsePositives(listOf(yellow, distantRed)))
+    }
+    @Test fun unreliableTopAndSideEdgesAreExcludedFromDetection() {
+        assertFalse(MushroomDetector.isWithinReliableDetectionArea(970, 200, 1000, 2000))
+        assertFalse(MushroomDetector.isWithinReliableDetectionArea(500, 100, 1000, 2000))
+        assertTrue(MushroomDetector.isWithinReliableDetectionArea(500, 1000, 1000, 2000))
     }
     @Test fun semverReleaseBeatsPrerelease() { assertTrue(VersionOrder.compare("1.2.3", "1.2.3-rc.10")!! > 0) }
     @Test fun numericPrereleaseOrdering() { assertTrue(VersionOrder.compare("1.2.3-rc.10", "1.2.3-rc.2")!! > 0) }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.pikmin.fakegps.data.model.BookmarkPoint
 import com.pikmin.fakegps.data.model.LocationHistoryPoint
+import com.pikmin.fakegps.data.model.DiscoveredMushroomPoint
 import com.pikmin.fakegps.data.model.MovementMode
 import org.json.JSONArray
 import org.json.JSONObject
@@ -30,6 +31,8 @@ class PreferencesRepo(context: Context) {
         private const val KEY_MAP_TYPE = "key_map_type"
         private const val KEY_BOOKMARKS = "key_bookmarks_json"
         private const val KEY_HISTORY = "key_location_history_json"
+        private const val KEY_DISCOVERED_MUSHROOMS = "key_discovered_mushrooms_json"
+        private const val MAX_DISCOVERED_MUSHROOMS = 200
 
         // 預設台北 101 座標
         const val DEFAULT_LAT = 25.033964
@@ -226,5 +229,46 @@ class PreferencesRepo(context: Context) {
             jsonArray.put(obj)
         }
         prefs.edit().putString(KEY_HISTORY, jsonArray.toString()).apply()
+    }
+
+    // ===== 無人機已發現蘑菇（避免巡航重複提醒） =====
+    fun getDiscoveredMushrooms(): List<DiscoveredMushroomPoint> {
+        val json = prefs.getString(KEY_DISCOVERED_MUSHROOMS, null) ?: return emptyList()
+        return try {
+            val array = JSONArray(json)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    add(
+                        DiscoveredMushroomPoint(
+                            typeName = item.getString("typeName"),
+                            latitude = item.getDouble("latitude"),
+                            longitude = item.getDouble("longitude"),
+                            discoveredAt = item.optLong("discoveredAt", System.currentTimeMillis())
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    fun addDiscoveredMushroom(point: DiscoveredMushroomPoint) {
+        val updated = buildList {
+            add(point)
+            addAll(getDiscoveredMushrooms())
+        }.take(MAX_DISCOVERED_MUSHROOMS)
+        val array = JSONArray()
+        updated.forEach { item ->
+            array.put(JSONObject().apply {
+                put("typeName", item.typeName)
+                put("latitude", item.latitude)
+                put("longitude", item.longitude)
+                put("discoveredAt", item.discoveredAt)
+            })
+        }
+        prefs.edit().putString(KEY_DISCOVERED_MUSHROOMS, array.toString()).apply()
     }
 }

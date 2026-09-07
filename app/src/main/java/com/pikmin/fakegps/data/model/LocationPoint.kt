@@ -36,3 +36,13 @@ data class LocationHistoryPoint(
     val note: String = "",
     val timestamp: Long = System.currentTimeMillis()
 ) : Serializable
+
+/**
+ * 無人機已提醒過的蘑菇；使用辨識種類名稱避免資料層依賴 CV 枚舉。
+ */
+data class DiscoveredMushroomPoint(
+    val typeName: String,
+    val latitude: Double,
+    val longitude: Double,
+    val discoveredAt: Long = System.currentTimeMillis()
+) : Serializable

@@ -7,7 +7,33 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 if (-not $ConfirmRelease) { throw "Release requires explicit user approval. Re-run with -ConfirmRelease only after approval." }
 $env:Path = "C:\Program Files\GitHub CLI;C:\Program Files\Git\cmd;" + $env:Path
-$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+$preferredJdk = "C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot"
+if (Test-Path -LiteralPath (Join-Path $preferredJdk 'bin\java.exe')) {
+    $env:JAVA_HOME = $preferredJdk
+} else {
+    $javaCommand = Get-Command java -ErrorAction Stop
+    $env:JAVA_HOME = Split-Path -Parent (Split-Path -Parent $javaCommand.Source)
+}
+
+function Convert-ProtectedText([string]$value) {
+    $secure = ConvertTo-SecureString $value
+    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+}
+
+$signingConfigPath = Join-Path $env:USERPROFILE '.android\pikmin-release-signing.dpapi.json'
+if (([string]::IsNullOrWhiteSpace($env:PIKMIN_RELEASE_STORE_FILE) -or
+     [string]::IsNullOrWhiteSpace($env:PIKMIN_RELEASE_STORE_PASSWORD) -or
+     [string]::IsNullOrWhiteSpace($env:PIKMIN_RELEASE_KEY_ALIAS) -or
+     [string]::IsNullOrWhiteSpace($env:PIKMIN_RELEASE_KEY_PASSWORD)) -and
+    (Test-Path -LiteralPath $signingConfigPath -PathType Leaf)) {
+    $signingConfig = Get-Content -LiteralPath $signingConfigPath -Raw | ConvertFrom-Json
+    $env:PIKMIN_RELEASE_STORE_FILE = $signingConfig.storeFile
+    $env:PIKMIN_RELEASE_KEY_ALIAS = $signingConfig.keyAlias
+    $env:PIKMIN_RELEASE_STORE_PASSWORD = Convert-ProtectedText $signingConfig.storePasswordProtected
+    $env:PIKMIN_RELEASE_KEY_PASSWORD = Convert-ProtectedText $signingConfig.keyPasswordProtected
+}
 function Assert-Exit([string]$operation) {
     if ($LASTEXITCODE -ne 0) { throw "$operation failed (exit $LASTEXITCODE)." }
 }

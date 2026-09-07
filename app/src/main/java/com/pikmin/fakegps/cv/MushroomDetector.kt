@@ -93,6 +93,29 @@ object MushroomDetector {
     private const val FAM_WHITE = 7
     private const val FAM_GRAY = 8
 
+    internal fun isWithinReliableDetectionArea(x: Int, y: Int, width: Int, height: Int): Boolean =
+        x >= (width * 0.05f).toInt() && x <= (width * 0.95f).toInt() &&
+            y >= (height * 0.12f).toInt() && y < (height * 0.88f).toInt()
+
+    /**
+     * 紅菇的米黃色菇柄會形成獨立黃色連通區塊。若紅／火色菇帽就在黃色候選正上方，
+     * 黃色區塊屬於同一圖示的菇柄，不可再回報成大黃菇。
+     */
+    internal fun removeKnownStemFalsePositives(
+        candidates: List<DetectedMushroom>
+    ): List<DetectedMushroom> = candidates.filterNot { yellow ->
+        if (yellow.type != MushroomType.LARGE_YELLOW) return@filterNot false
+        candidates.any { cap ->
+            if (cap === yellow || cap.type !in setOf(MushroomType.LARGE_RED, MushroomType.LARGE_FIRE)) {
+                return@any false
+            }
+            val scale = max(cap.radius, yellow.radius).toDouble()
+            val dx = abs(cap.x - yellow.x).toDouble()
+            val dy = (yellow.y - cap.y).toDouble()
+            dy in 0.0..(scale * 1.8) && dx <= scale * 1.15
+        }
+    }
+
     /**
      * 分析遊戲畫面 Bitmap，支援多距離動態尺度與色票聚合投票
      */
@@ -123,8 +146,8 @@ object MushroomDetector {
         try { scaledBitmap.getPixels(pixels, 0, scaledW, 0, 0, scaledW, scaledH) }
         finally { if (scaledBitmap !== sourceBitmap) scaledBitmap.recycle() }
 
-        // 僅分析螢幕中段 (排除頂部 8% 狀態列與底部控制底欄)
-        val startY = (scaledH * 0.08f).toInt()
+        // 僅分析可靠的地圖中段；頂端狀態列附近與畫面邊緣的局部河流容易形成假水菇。
+        val startY = (scaledH * 0.12f).toInt()
         val endY = (scaledH * 0.88f).toInt()
 
         val hsv = FloatArray(3)
@@ -142,6 +165,7 @@ object MushroomDetector {
         for (y in startY until endY) {
             val rowOffset = y * scaledW
             for (x in 0 until scaledW) {
+                if (!isWithinReliableDetectionArea(x, y, scaledW, scaledH)) continue
                 if (abs(x - centerPlayerX) <= playerExclusionRadiusX && abs(y - centerPlayerY) <= playerExclusionRadiusY) {
                     continue
                 }
@@ -254,11 +278,6 @@ object MushroomDetector {
 
                     val dominantType = MushroomType.entries[bestTypeIndex]
 
-                    // 判斷是否為使用者要尋找的目標種類
-                    if (!targetTypes.contains(dominantType)) {
-                        continue
-                    }
-
                     val purity = maxVotes.toFloat() / count.toFloat()
                     if (purity < 0.35f) {
                         continue
@@ -293,9 +312,7 @@ object MushroomDetector {
                     val origY = ((sumY / count) / scale).toInt()
 
                     // 排除螢幕邊緣破圖雜訊 (左右極緣各 3%) 與左上角玩家個人頭像區域
-                    val minValidX = (width * 0.03f).toInt()
-                    val maxValidX = (width * 0.97f).toInt()
-                    if (origX !in minValidX..maxValidX) {
+                    if (!isWithinReliableDetectionArea(origX, origY, width, height)) {
                         continue
                     }
                     if (origX < (width * 0.16f) && origY < (height * 0.22f)) {
@@ -321,13 +338,17 @@ object MushroomDetector {
             }
         }
 
+        // 先排除同一紅／火菇圖示中被切開的黃色菇柄，再進行候選排序。
+        val shapeValidated = removeKnownStemFalsePositives(detected)
+            .filter { targetTypes.contains(it.type) }
+
         // 依聚類半徑與信心度降序排序
-        detected.sortByDescending { it.radius * it.confidence }
+        val sorted = shapeValidated.sortedByDescending { it.radius * it.confidence }
 
         // 類別感知型歐幾里得幾何距離非極大值抑制 (Type-Aware Euclidean NMS)
         // 同種類蘑菇進行光圈聚合（防止同顆菇多圈）；不同種類蘑菇則允許緊鄰並存（例如活動菇與大紅菇並排）
         val merged = mutableListOf<DetectedMushroom>()
-        for (m in detected) {
+        for (m in sorted) {
             val duplicate = merged.find { accepted ->
                 val dx = (accepted.x - m.x).toDouble()
                 val dy = (accepted.y - m.y).toDouble()

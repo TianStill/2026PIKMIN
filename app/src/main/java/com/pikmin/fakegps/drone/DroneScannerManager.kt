@@ -32,8 +32,10 @@ import com.pikmin.fakegps.cv.DetectedMushroom
 import com.pikmin.fakegps.cv.MushroomDetector
 import com.pikmin.fakegps.cv.MushroomType
 import com.pikmin.fakegps.data.model.LocationPoint
+import com.pikmin.fakegps.data.model.DiscoveredMushroomPoint
 import com.pikmin.fakegps.data.repository.PreferencesRepo
 import com.pikmin.fakegps.service.MockLocationService
+import com.pikmin.fakegps.utils.GeoUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,6 +81,22 @@ data class DroneCruiseProfile(
  */
 @MainThread
 object DroneScannerManager {
+
+    internal const val PREVIOUSLY_FOUND_RADIUS_METERS = 180.0
+
+    internal fun wasPreviouslyFound(
+        type: MushroomType,
+        estimatedLocation: LocationPoint,
+        discovered: List<DiscoveredMushroomPoint>
+    ): Boolean = discovered.any {
+        it.typeName == type.name &&
+            GeoUtils.calculateDistanceMeters(
+                it.latitude,
+                it.longitude,
+                estimatedLocation.latitude,
+                estimatedLocation.longitude
+            ) <= PREVIOUSLY_FOUND_RADIUS_METERS
+    }
 
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var scanJob: Job? = null
@@ -378,6 +396,7 @@ object DroneScannerManager {
         }
         val appContext = context.applicationContext
         val prefs = PreferencesRepo(appContext)
+        val discoveredMushrooms = prefs.getDiscoveredMushrooms().toMutableList()
         val captureToken = captureGeneration
         analysisTrace.clear()
         _status.value = DroneScanStatus(phase = ScanPhase.WAITING_FOR_FRAME, isScanning = true,
@@ -448,9 +467,18 @@ object DroneScannerManager {
                             val detected = try {
                                 withContext(Dispatchers.Default) { MushroomDetector.detectMushrooms(frame.bitmap, targetTypes) }
                             } finally { frame.bitmap.recycle() }
+                            val newCandidates = detected.filterNot { candidate ->
+                                wasPreviouslyFound(
+                                    candidate.type,
+                                    estimateMushroomLocation(waypoint, candidate),
+                                    discoveredMushrooms
+                                )
+                            }
                             analysedFrames++
-                            found = confirmation.observe(frame.time, detected)
-                            val trace = "waypoint=${index + 1} frames=$analysedFrames candidates=${detected.map { it.type }} confirmed=${found?.type}"
+                            found = confirmation.observe(frame.time, newCandidates)
+                            val trace = "waypoint=${index + 1} frames=$analysedFrames " +
+                                "candidates=${detected.map { "${it.type}@(${it.x},${it.y})/r${it.radius}/p${"%.2f".format(java.util.Locale.US, it.confidence)}" }} " +
+                                "new=${newCandidates.map { it.type }} confirmed=${found?.type}"
                             if (analysisTrace.size >= 60) analysisTrace.removeFirst()
                             analysisTrace.addLast(trace)
                             android.util.Log.d("DroneScanner", trace)
@@ -461,7 +489,7 @@ object DroneScannerManager {
                     check(analysedFrames >= 3) { "未取得足夠的新畫面，搜尋已暫停，請確認遊戲畫面與擷取權限" }
                     if (found != null) {
                         currentStartIndex = index + 1
-                        onTargetDiscovered(appContext, found, waypoint, prefs)
+                        onTargetDiscovered(appContext, found, waypoint, prefs, discoveredMushrooms)
                         return@launch
                     }
                     currentStartIndex = index + 1
@@ -537,17 +565,27 @@ object DroneScannerManager {
         context: Context,
         target: DetectedMushroom,
         location: LocationPoint,
-        prefs: PreferencesRepo
+        prefs: PreferencesRepo,
+        discoveredMushrooms: MutableList<DiscoveredMushroomPoint>
     ) {
         val label = MushroomType.getDisplayName(target.type)
+        val estimatedLocation = estimateMushroomLocation(location, target)
         check(MockLocationService.updateLocation(context, location)) { "目標已辨識，但定位已停止，無法保持觀測航點" }
+
+        val discovered = DiscoveredMushroomPoint(
+            typeName = target.type.name,
+            latitude = estimatedLocation.latitude,
+            longitude = estimatedLocation.longitude
+        )
+        prefs.addDiscoveredMushroom(discovered)
+        discoveredMushrooms.add(0, discovered)
 
         _status.value = _status.value.copy(
             phase = ScanPhase.FOUND,
             isScanning = false,
             foundTarget = target,
             foundLocation = location,
-            estimatedLocation = estimateMushroomLocation(location, target),
+            estimatedLocation = estimatedLocation,
             statusMessage = "發現候選【$label】，已停在觀測航點；請在遊戲內確認種類與大小"
         )
 
