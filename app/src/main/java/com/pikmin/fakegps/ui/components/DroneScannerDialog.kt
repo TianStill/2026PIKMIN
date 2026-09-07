@@ -54,7 +54,7 @@ fun DroneScannerDialog(
     val scanStatus by DroneScannerManager.status.collectAsState()
 
     var selectedRadiusKm by remember { mutableStateOf(1.5) }
-    var selectedTypes by remember { mutableStateOf(MushroomType.ALL_TARGETS) }
+    var selectedTypes by remember { mutableStateOf(MushroomType.DEFAULT_CRUISE_TARGETS) }
     var speedMode by remember { mutableStateOf(DroneCruiseProfile.STANDARD.modeId) }
     var dwellSeconds by remember { mutableStateOf(DroneCruiseProfile.STANDARD.dwellSeconds) }
     var stepMeters by remember { mutableStateOf(DroneCruiseProfile.STANDARD.stepMeters) }

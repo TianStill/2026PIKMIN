@@ -42,6 +42,7 @@ enum class MushroomType(
         val ALL_TARGETS = entries.toSet()
         val ELEMENT_TARGETS = entries.filter { it.category == MushroomCategory.LARGE_ELEMENT }.toSet()
         val COLOR_TARGETS = entries.filter { it.category == MushroomCategory.LARGE_COLOR }.toSet()
+        val DEFAULT_CRUISE_TARGETS = ELEMENT_TARGETS
 
         /**
          * 取得對外顯示完整標籤
@@ -96,6 +97,16 @@ object MushroomDetector {
     internal fun isWithinReliableDetectionArea(x: Int, y: Int, width: Int, height: Int): Boolean =
         x >= (width * 0.05f).toInt() && x <= (width * 0.95f).toInt() &&
             y >= (height * 0.12f).toInt() && y < (height * 0.88f).toInt()
+
+    internal fun touchesDetectionBoundary(
+        minX: Int,
+        maxX: Int,
+        minY: Int,
+        maxY: Int,
+        width: Int,
+        height: Int
+    ): Boolean = minX <= (width * 0.05f).toInt() || maxX >= (width * 0.95f).toInt() ||
+        minY <= (height * 0.12f).toInt() || maxY >= (height * 0.88f).toInt() - 1
 
     /**
      * 紅菇的米黃色菇柄會形成獨立黃色連通區塊。若紅／火色菇帽就在黃色候選正上方，
@@ -248,6 +259,11 @@ object MushroomDetector {
                     val bboxW = maxX - minX + 1
                     val bboxH = maxY - minY + 1
                     val bboxArea = bboxW * bboxH
+
+                    // 被可靠區邊界截斷的色塊形狀與真實大小未知；常見情況是大片河流被裁成假水菇。
+                    if (touchesDetectionBoundary(minX, maxX, minY, maxY, scaledW, scaledH)) {
+                        continue
+                    }
 
                     // 地形特徵過濾：排除過大區塊 (整條馬路、大片湖泊)
                     if (bboxW > maxBboxW || bboxH > maxBboxH || count > maxClusterSize) {

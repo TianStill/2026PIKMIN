@@ -14,6 +14,12 @@ class ReliabilityTest {
     private fun candidate(x: Int = 100, type: MushroomType = MushroomType.LARGE_RED) =
         DetectedMushroom(type, x, 200, 40, 0.8f)
 
+    @Test fun cruiseDefaultsToLargeElementMushroomsOnly() {
+        assertEquals(MushroomType.ELEMENT_TARGETS, MushroomType.DEFAULT_CRUISE_TARGETS)
+        assertTrue(MushroomType.DEFAULT_CRUISE_TARGETS.all { it.category == MushroomCategory.LARGE_ELEMENT })
+        assertFalse(MushroomType.DEFAULT_CRUISE_TARGETS.contains(MushroomType.LARGE_RED))
+    }
+
     @Test fun stopInvalidatesQueuedStart() {
         val gate = SessionGate(); val token = gate.begin(); gate.stop()
         assertFalse(gate.accepts(token))
@@ -87,6 +93,11 @@ class ReliabilityTest {
         assertFalse(MushroomDetector.isWithinReliableDetectionArea(970, 200, 1000, 2000))
         assertFalse(MushroomDetector.isWithinReliableDetectionArea(500, 100, 1000, 2000))
         assertTrue(MushroomDetector.isWithinReliableDetectionArea(500, 1000, 1000, 2000))
+    }
+    @Test fun clippedWaterRegionTouchingDetectionBoundaryIsRejected() {
+        assertTrue(MushroomDetector.touchesDetectionBoundary(800, 950, 300, 800, 1000, 2000))
+        assertTrue(MushroomDetector.touchesDetectionBoundary(200, 600, 240, 500, 1000, 2000))
+        assertFalse(MushroomDetector.touchesDetectionBoundary(200, 600, 300, 800, 1000, 2000))
     }
     @Test fun semverReleaseBeatsPrerelease() { assertTrue(VersionOrder.compare("1.2.3", "1.2.3-rc.10")!! > 0) }
     @Test fun numericPrereleaseOrdering() { assertTrue(VersionOrder.compare("1.2.3-rc.10", "1.2.3-rc.2")!! > 0) }
