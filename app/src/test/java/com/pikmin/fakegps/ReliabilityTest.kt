@@ -27,11 +27,13 @@ class ReliabilityTest {
 
     @Test fun calibratedElementShapeThresholdsSeparateKnownPairs() {
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 34, 33, 421))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 27, 25, 280))
         assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 37, 22, 521))
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_FIRE, 47, 32, 797))
         assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_FIRE, 38, 23, 454))
-        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_WATER, 42, 28, 538))
-        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_WATER, 23, 51, 313))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_WATER, 42, 28, 538, 0.94f))
+        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_WATER, 42, 28, 538, 1.0f))
+        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_WATER, 23, 51, 313, 1.0f))
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_CRYSTAL, 42, 40, 513))
         assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_CRYSTAL, 28, 28, 257))
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_POISON, 18, 35, 219))
@@ -91,10 +93,17 @@ class ReliabilityTest {
         val nearby = LocationPoint(25.0005, 121.0)
         assertTrue(DroneScannerManager.wasPreviouslyFound(MushroomType.LARGE_RED, nearby, known))
     }
+    @Test fun sameMushroomAcrossAdjacentWaypointsIsSuppressed() {
+        val known = listOf(DiscoveredMushroomPoint(MushroomType.LARGE_WATER.name, 25.0, 121.0))
+        val adjacentWaypointEstimate = LocationPoint(25.006, 121.0)
+        assertTrue(DroneScannerManager.wasPreviouslyFound(
+            MushroomType.LARGE_WATER, adjacentWaypointEstimate, known
+        ))
+    }
     @Test fun differentTypeOrDistantCandidateIsNotSuppressed() {
         val known = listOf(DiscoveredMushroomPoint(MushroomType.LARGE_RED.name, 25.0, 121.0))
         assertFalse(DroneScannerManager.wasPreviouslyFound(MushroomType.LARGE_BLUE, LocationPoint(25.0005, 121.0), known))
-        assertFalse(DroneScannerManager.wasPreviouslyFound(MushroomType.LARGE_RED, LocationPoint(25.003, 121.0), known))
+        assertFalse(DroneScannerManager.wasPreviouslyFound(MushroomType.LARGE_RED, LocationPoint(25.010, 121.0), known))
     }
     @Test fun yellowStemBelowRedCapIsNotReportedAsYellowMushroom() {
         val redCap = DetectedMushroom(MushroomType.LARGE_RED, 300, 300, 60, 0.8f)
@@ -129,6 +138,13 @@ class ReliabilityTest {
         val points = DronePathGenerator.generateSpiralWaypoints(25.0, 179.999, 1.5, 300.0)
         assertTrue(points.size > 10)
         assertTrue(points.all { it.longitude in -180.0..180.0 && GeoUtils.calculateDistanceMeters(25.0, 179.999, it.latitude, it.longitude) <= 1500.1 })
+    }
+    @Test fun fiveKilometerAndCustomRadiusAreSupported() {
+        assertTrue(DronePathGenerator.generateSpiralWaypoints(25.0, 121.0, 5.0, 1000.0).size > 10)
+        assertTrue(DronePathGenerator.generateSpiralWaypoints(25.0, 121.0, 8.0, 1000.0).size > 20)
+    }
+    @Test(expected = IllegalArgumentException::class) fun excessiveCustomRadiusRejected() {
+        DronePathGenerator.generateSpiralWaypoints(25.0, 121.0, 20.1, 1000.0)
     }
     @Test(expected = IllegalArgumentException::class) fun zeroStepRejected() { DronePathGenerator.generateSpiralWaypoints(25.0, 121.0, 1.5, 0.0) }
     @Test(expected = IllegalArgumentException::class) fun polarRouteRejected() { DronePathGenerator.generateSpiralWaypoints(90.0, 0.0, 1.5) }

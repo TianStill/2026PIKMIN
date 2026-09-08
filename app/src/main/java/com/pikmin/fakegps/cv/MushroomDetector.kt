@@ -88,13 +88,22 @@ object MushroomDetector {
      * 固定最遠視角下，各元素菇以 640px 長邊影像校準的「大型」輪廓。
      * 門檻取自成對的大型／一般真機截圖；無法明確落在大型區間時一律拒絕。
      */
-    internal fun isLargeElementShape(type: MushroomType, width: Int, height: Int, pixelCount: Int): Boolean {
+    internal fun isLargeElementShape(
+        type: MushroomType,
+        width: Int,
+        height: Int,
+        pixelCount: Int,
+        dominantColorPurity: Float = 0.8f
+    ): Boolean {
         if (type.category != MushroomCategory.LARGE_ELEMENT || width <= 0 || height <= 0) return false
         val aspect = width.toFloat() / height.toFloat()
         return when (type) {
-            MushroomType.LARGE_ELECTRIC -> height >= 28 && aspect in 0.75f..1.30f && pixelCount >= 320
+            // 大電菇在巡航動態畫面會比靜態樣本略小；一般電菇則明顯扁寬。
+            MushroomType.LARGE_ELECTRIC -> height >= 24 && aspect in 0.72f..1.35f && pixelCount >= 250
             MushroomType.LARGE_FIRE -> width >= 43 && height >= 28 && pixelCount >= 620
-            MushroomType.LARGE_WATER -> width >= 35 && height >= 25 && aspect in 1.10f..2.20f && pixelCount >= 400
+            // 真正水菇同時含淺藍水體與深藍菇帽；純度接近 1.0 的單一水藍區塊是河流／水池。
+            MushroomType.LARGE_WATER -> width >= 35 && height >= 25 && aspect in 1.10f..2.20f &&
+                pixelCount >= 400 && dominantColorPurity <= 0.985f
             MushroomType.LARGE_CRYSTAL -> width >= 34 && height >= 34 && pixelCount >= 380
             MushroomType.LARGE_POISON -> width >= 16 && height >= 30 && pixelCount >= 180
             else -> false
@@ -341,7 +350,7 @@ object MushroomDetector {
                     if (fillRatio < thresholds.minFillRatio) continue
 
                     if (dominantType.category == MushroomCategory.LARGE_ELEMENT &&
-                        !isLargeElementShape(dominantType, bboxW, bboxH, count)) {
+                        !isLargeElementShape(dominantType, bboxW, bboxH, count, purity)) {
                         continue
                     }
 

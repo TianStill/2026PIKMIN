@@ -36,6 +36,16 @@ class DetectorInstrumentedTest {
         }
     }
 
+    @Test fun reproducedTerrainWaterFalsePositiveIsRejected() {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        val bitmap = assets.open("false-positive-samples/terrain-water-20260908.jpg")
+            .use { BitmapFactory.decodeStream(it) } ?: error("Cannot decode reproduced terrain sample")
+        try {
+            val predictions = MushroomDetector.detectMushrooms(bitmap, setOf(MushroomType.LARGE_WATER))
+            assertTrue("Terrain incorrectly detected as large water mushroom: $predictions", predictions.isEmpty())
+        } finally { bitmap.recycle() }
+    }
+
     @Test fun allLargeElementReferencesDetectAtSourceAndCruiseResolution() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         val samples = listOf(

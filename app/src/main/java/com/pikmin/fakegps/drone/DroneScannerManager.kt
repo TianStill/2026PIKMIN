@@ -82,7 +82,8 @@ data class DroneCruiseProfile(
 @MainThread
 object DroneScannerManager {
 
-    internal const val PREVIOUSLY_FOUND_RADIUS_METERS = 180.0
+    // 巡航步距最高 360m，加上最遠視角的像素座標估算誤差；750m 可涵蓋相鄰航點看到同一顆菇。
+    internal const val PREVIOUSLY_FOUND_RADIUS_METERS = 750.0
 
     internal fun wasPreviouslyFound(
         type: MushroomType,

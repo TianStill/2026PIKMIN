@@ -7,6 +7,8 @@ import kotlin.math.*
  * 無人機網格/螺旋巡弋航點生成器
  */
 object DronePathGenerator {
+    const val MIN_RADIUS_KM = 0.1
+    const val MAX_RADIUS_KM = 20.0
 
     /**
      * 以中心點為基準，生成向外擴散的螺旋巡弋座標序列
@@ -24,7 +26,9 @@ object DronePathGenerator {
     ): List<LocationPoint> {
         require(centerLat.isFinite() && centerLat in -85.0..85.0) { "巡航緯度需介於 -85 與 85 度" }
         require(centerLng.isFinite() && centerLng in -180.0..180.0) { "經度超出範圍" }
-        require(radiusKm.isFinite() && radiusKm in 0.1..3.0) { "半徑需介於 0.1 與 3 公里" }
+        require(radiusKm.isFinite() && radiusKm in MIN_RADIUS_KM..MAX_RADIUS_KM) {
+            "半徑需介於 $MIN_RADIUS_KM 與 $MAX_RADIUS_KM 公里"
+        }
         require(stepMeters.isFinite() && stepMeters in 100.0..1000.0) { "航點間距需介於 100 與 1000 公尺" }
         val waypoints = mutableListOf<LocationPoint>()
 

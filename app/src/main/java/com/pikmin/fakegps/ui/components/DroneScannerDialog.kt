@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pikmin.fakegps.cv.DetectedMushroom
@@ -36,6 +38,7 @@ import com.pikmin.fakegps.cv.MushroomCategory
 import com.pikmin.fakegps.cv.MushroomDetector
 import com.pikmin.fakegps.cv.MushroomType
 import com.pikmin.fakegps.drone.DroneCruiseProfile
+import com.pikmin.fakegps.drone.DronePathGenerator
 import com.pikmin.fakegps.drone.DroneScannerManager
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,7 +56,15 @@ fun DroneScannerDialog(
     var testing by remember { mutableStateOf(false) }
     val scanStatus by DroneScannerManager.status.collectAsState()
 
-    var selectedRadiusKm by remember { mutableStateOf(1.5) }
+    var radiusMode by remember { mutableStateOf("3") }
+    var customRadiusText by remember { mutableStateOf("8") }
+    val selectedRadiusKm = when (radiusMode) {
+        "3" -> 3.0
+        "5" -> 5.0
+        else -> customRadiusText.toDoubleOrNull()
+    }
+    val radiusIsValid = selectedRadiusKm != null &&
+        selectedRadiusKm in DronePathGenerator.MIN_RADIUS_KM..DronePathGenerator.MAX_RADIUS_KM
     var selectedTypes by remember { mutableStateOf(MushroomType.DEFAULT_CRUISE_TARGETS) }
     var speedMode by remember { mutableStateOf(DroneCruiseProfile.STANDARD.modeId) }
     var dwellSeconds by remember { mutableStateOf(DroneCruiseProfile.STANDARD.dwellSeconds) }
@@ -116,7 +127,7 @@ fun DroneScannerDialog(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text("🛸 無人機尋菇雷達", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                    Text("色彩候選辨識；種類與大小需在遊戲內確認", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Text("固定最遠視角；僅提醒校準後的大型目標", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                 }
             }
         },
@@ -230,14 +241,14 @@ fun DroneScannerDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf(1.0 to "1 km", 1.5 to "1.5 km", 2.0 to "2 km", 3.0 to "3 km").forEach { (km, label) ->
-                            val isSelected = selectedRadiusKm == km
+                        listOf("3" to "3 km", "5" to "5 km", "custom" to "自訂").forEach { (mode, label) ->
+                            val isSelected = radiusMode == mode
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable { selectedRadiusKm = km }
+                                    .clickable { radiusMode = mode }
                             ) {
                                 Box(
                                     modifier = Modifier.padding(vertical = 8.dp),
@@ -252,6 +263,24 @@ fun DroneScannerDialog(
                                 }
                             }
                         }
+                    }
+                    if (radiusMode == "custom") {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = customRadiusText,
+                            onValueChange = { value ->
+                                customRadiusText = value.filter { it.isDigit() || it == '.' }.take(6)
+                            },
+                            label = { Text("自訂巡航半徑") },
+                            suffix = { Text("km") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            isError = !radiusIsValid,
+                            supportingText = {
+                                Text(if (radiusIsValid) "可輸入 0.1～20 km" else "請輸入 0.1～20 km")
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
@@ -523,8 +552,9 @@ fun DroneScannerDialog(
             } else {
                 Button(
                     onClick = {
-                        onStartDroneScan(selectedRadiusKm, selectedTypes, dwellSeconds, stepMeters)
+                        onStartDroneScan(selectedRadiusKm!!, selectedTypes, dwellSeconds, stepMeters)
                     },
+                    enabled = radiusIsValid && selectedTypes.isNotEmpty(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
