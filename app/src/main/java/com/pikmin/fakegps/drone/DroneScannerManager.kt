@@ -407,6 +407,13 @@ object DroneScannerManager {
         scanJob = scope.launch {
             var wakeRenewal: Job? = null
             try {
+                withContext(Dispatchers.IO) {
+                    DroneDiagnosticRecorder.startSession(
+                        appContext,
+                        targetTypes.map { it.name }.toSet(),
+                        waypoints.size
+                    )
+                }
                 acquireWakeLock(appContext)
                 wakeRenewal = launch {
                     while (isActive) {
@@ -465,25 +472,32 @@ object DroneScannerManager {
                                 continue
                             }
                             blankFrames = 0
-                            val detected = try {
-                                withContext(Dispatchers.Default) { MushroomDetector.detectMushrooms(frame.bitmap, targetTypes) }
+                            try {
+                                val detected = withContext(Dispatchers.Default) {
+                                    MushroomDetector.detectMushrooms(frame.bitmap, targetTypes)
+                                }
+                                val newCandidates = detected.filterNot { candidate ->
+                                    wasPreviouslyFound(
+                                        candidate.type,
+                                        estimateMushroomLocation(waypoint, candidate),
+                                        discoveredMushrooms
+                                    )
+                                }
+                                analysedFrames++
+                                found = confirmation.observe(frame.time, newCandidates)
+                                val trace = "frames=$analysedFrames " +
+                                    "candidates=${detected.map { "${it.type}@(${it.x},${it.y})/r${it.radius}/p${"%.2f".format(java.util.Locale.US, it.confidence)}" }} " +
+                                    "new=${newCandidates.map { it.type }} confirmed=${found?.type}"
+                                if (analysisTrace.size >= 60) analysisTrace.removeFirst()
+                                analysisTrace.addLast("waypoint=${index + 1} $trace")
+                                android.util.Log.d("DroneScanner", "waypoint=${index + 1} $trace")
+                                withContext(Dispatchers.IO) {
+                                    DroneDiagnosticRecorder.recordFrame(
+                                        appContext, frame.bitmap, frame.time, index + 1, waypoint, trace
+                                    )
+                                }
+                                if (found != null) break
                             } finally { frame.bitmap.recycle() }
-                            val newCandidates = detected.filterNot { candidate ->
-                                wasPreviouslyFound(
-                                    candidate.type,
-                                    estimateMushroomLocation(waypoint, candidate),
-                                    discoveredMushrooms
-                                )
-                            }
-                            analysedFrames++
-                            found = confirmation.observe(frame.time, newCandidates)
-                            val trace = "waypoint=${index + 1} frames=$analysedFrames " +
-                                "candidates=${detected.map { "${it.type}@(${it.x},${it.y})/r${it.radius}/p${"%.2f".format(java.util.Locale.US, it.confidence)}" }} " +
-                                "new=${newCandidates.map { it.type }} confirmed=${found?.type}"
-                            if (analysisTrace.size >= 60) analysisTrace.removeFirst()
-                            analysisTrace.addLast(trace)
-                            android.util.Log.d("DroneScanner", trace)
-                            if (found != null) break
                         }
                         delay(250)
                     }

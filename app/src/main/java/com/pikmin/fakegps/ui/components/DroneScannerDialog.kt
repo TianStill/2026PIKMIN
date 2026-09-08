@@ -2,6 +2,7 @@ package com.pikmin.fakegps.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -40,6 +41,7 @@ import com.pikmin.fakegps.cv.MushroomType
 import com.pikmin.fakegps.drone.DroneCruiseProfile
 import com.pikmin.fakegps.drone.DronePathGenerator
 import com.pikmin.fakegps.drone.DroneScannerManager
+import com.pikmin.fakegps.drone.DroneDiagnosticRecorder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +56,26 @@ fun DroneScannerDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var testing by remember { mutableStateOf(false) }
+    var exportingDiagnostic by remember { mutableStateOf(false) }
     val scanStatus by DroneScannerManager.status.collectAsState()
+
+    val exportDiagnostic: (String) -> Unit = { issue ->
+        scope.launch {
+            exportingDiagnostic = true
+            try {
+                val report = withContext(Dispatchers.IO) {
+                    DroneDiagnosticRecorder.createReport(context, issue, DroneScannerManager.diagnosticSummary())
+                }
+                context.startActivity(
+                    Intent.createChooser(DroneDiagnosticRecorder.shareIntent(context, report), "分享巡航診斷 ZIP")
+                )
+            } catch (e: Exception) {
+                Toast.makeText(context, "無法產生診斷檔：${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            } finally {
+                exportingDiagnostic = false
+            }
+        }
+    }
 
     var radiusMode by remember { mutableStateOf("3") }
     var customRadiusText by remember { mutableStateOf("8") }
@@ -516,7 +537,34 @@ fun DroneScannerDialog(
 
                 HorizontalDivider()
 
-                // 6. 圖片辨識測試工具
+                // 6. 巡航診斷：一鍵保留最近畫面與每幀判定，不必手動挑截圖。
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🧰 巡航診斷回報", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "巡航會循環保存最近 24 張分析畫面；發生問題後回到這裡按一次，即可匯出 ZIP。ZIP 會包含畫面與巡航座標，請只分享給信任的對象。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { exportDiagnostic("false-positive") },
+                            enabled = !exportingDiagnostic,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("沒有菇卻通知", fontSize = 12.sp) }
+                        OutlinedButton(
+                            onClick = { exportDiagnostic("missed-target") },
+                            enabled = !exportingDiagnostic,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("有菇但沒找到", fontSize = 12.sp) }
+                    }
+                    if (exportingDiagnostic) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+
+                HorizontalDivider()
+
+                // 7. 圖片辨識測試工具
                 OutlinedButton(
                     onClick = { photoPickerLauncher.launch("image/*") },
                     enabled = !testing,

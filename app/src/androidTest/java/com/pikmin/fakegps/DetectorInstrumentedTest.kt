@@ -5,18 +5,53 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.content.Intent
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pikmin.fakegps.cv.MushroomDetector
 import com.pikmin.fakegps.cv.MushroomType
 import com.pikmin.fakegps.drone.DroneScannerManager
+import com.pikmin.fakegps.drone.DroneDiagnosticRecorder
+import com.pikmin.fakegps.data.model.LocationPoint
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
+import java.util.zip.ZipFile
 
 class DetectorInstrumentedTest {
+    @Test fun diagnosticReportKeepsBoundedFramesAndMetadata() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        DroneDiagnosticRecorder.startSession(context, setOf(MushroomType.LARGE_WATER.name), 12)
+        val bitmap = Bitmap.createBitmap(80, 120, Bitmap.Config.ARGB_8888)
+        try {
+            bitmap.eraseColor(Color.GREEN)
+            repeat(30) { index ->
+                DroneDiagnosticRecorder.recordFrame(
+                    context, bitmap, 1_000L + index * 600L, index + 1,
+                    LocationPoint(25.0, 121.0), "candidates=[] confirmed=null"
+                )
+            }
+        } finally { bitmap.recycle() }
+        val report = DroneDiagnosticRecorder.createReport(context, "missed-target", "test-status")
+        assertTrue(report.isFile)
+        ZipFile(report).use { zip ->
+            val names = zip.entries().asSequence().map { it.name }.toList()
+            assertTrue(names.contains("report.txt"))
+            assertTrue(names.contains("diagnostic/session.txt"))
+            assertTrue(names.contains("diagnostic/analysis.log"))
+            assertEquals(24, names.count { it.startsWith("diagnostic/frames/") })
+            val reportText = zip.getInputStream(zip.getEntry("report.txt")).bufferedReader().use { it.readText() }
+            assertTrue(reportText.contains("issue=missed-target"))
+        }
+        val share = DroneDiagnosticRecorder.shareIntent(context, report)
+        assertEquals(Intent.ACTION_SEND, share.action)
+        assertEquals("application/zip", share.type)
+        assertTrue(share.hasExtra(Intent.EXTRA_STREAM))
+        assertTrue(share.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+    }
+
     @Test fun normalElementReferencesAreRejected() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         val samples = listOf(
