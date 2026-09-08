@@ -46,6 +46,19 @@ class DetectorInstrumentedTest {
         } finally { bitmap.recycle() }
     }
 
+    @Test fun largeElectricCruiseScreensAreDetected() {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        for (filename in listOf("large-electric-cruise-1.jpg", "large-electric-cruise-2.jpg")) {
+            val bitmap = assets.open("element-samples/$filename").use { BitmapFactory.decodeStream(it) }
+                ?: error("Cannot decode $filename")
+            try {
+                val predictions = MushroomDetector.detectMushrooms(bitmap, setOf(MushroomType.LARGE_ELECTRIC))
+                assertTrue("$filename did not detect large electric mushroom: $predictions",
+                    predictions.any { it.type == MushroomType.LARGE_ELECTRIC && it.isGiant == true })
+            } finally { bitmap.recycle() }
+        }
+    }
+
     @Test fun allLargeElementReferencesDetectAtSourceAndCruiseResolution() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         val samples = listOf(

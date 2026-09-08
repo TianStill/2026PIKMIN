@@ -28,6 +28,7 @@ class ReliabilityTest {
     @Test fun calibratedElementShapeThresholdsSeparateKnownPairs() {
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 34, 33, 421))
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 27, 25, 280))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 24, 20, 170))
         assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 37, 22, 521))
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_FIRE, 47, 32, 797))
         assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_FIRE, 38, 23, 454))
@@ -116,13 +117,15 @@ class ReliabilityTest {
         assertEquals(listOf(yellow, distantRed), MushroomDetector.removeKnownStemFalsePositives(listOf(yellow, distantRed)))
     }
     @Test fun unreliableTopAndSideEdgesAreExcludedFromDetection() {
-        assertFalse(MushroomDetector.isWithinReliableDetectionArea(970, 200, 1000, 2000))
+        assertFalse(MushroomDetector.isWithinReliableDetectionArea(990, 200, 1000, 2000))
+        assertTrue(MushroomDetector.isWithinReliableDetectionArea(970, 200, 1000, 2000))
         assertFalse(MushroomDetector.isWithinReliableDetectionArea(500, 100, 1000, 2000))
+        assertTrue(MushroomDetector.isWithinReliableDetectionArea(500, 200, 1000, 2000))
         assertTrue(MushroomDetector.isWithinReliableDetectionArea(500, 1000, 1000, 2000))
     }
     @Test fun clippedWaterRegionTouchingDetectionBoundaryIsRejected() {
-        assertTrue(MushroomDetector.touchesDetectionBoundary(800, 950, 300, 800, 1000, 2000))
-        assertTrue(MushroomDetector.touchesDetectionBoundary(200, 600, 240, 500, 1000, 2000))
+        assertTrue(MushroomDetector.touchesDetectionBoundary(800, 990, 300, 800, 1000, 2000))
+        assertTrue(MushroomDetector.touchesDetectionBoundary(200, 600, 150, 500, 1000, 2000))
         assertFalse(MushroomDetector.touchesDetectionBoundary(200, 600, 300, 800, 1000, 2000))
     }
     @Test fun semverReleaseBeatsPrerelease() { assertTrue(VersionOrder.compare("1.2.3", "1.2.3-rc.10")!! > 0) }

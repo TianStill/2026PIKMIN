@@ -99,7 +99,7 @@ object MushroomDetector {
         val aspect = width.toFloat() / height.toFloat()
         return when (type) {
             // 大電菇在巡航動態畫面會比靜態樣本略小；一般電菇則明顯扁寬。
-            MushroomType.LARGE_ELECTRIC -> height >= 24 && aspect in 0.72f..1.35f && pixelCount >= 250
+            MushroomType.LARGE_ELECTRIC -> height >= 20 && aspect in 0.65f..1.55f && pixelCount >= 150
             MushroomType.LARGE_FIRE -> width >= 43 && height >= 28 && pixelCount >= 620
             // 真正水菇同時含淺藍水體與深藍菇帽；純度接近 1.0 的單一水藍區塊是河流／水池。
             MushroomType.LARGE_WATER -> width >= 35 && height >= 25 && aspect in 1.10f..2.20f &&
@@ -121,8 +121,8 @@ object MushroomDetector {
     private const val FAM_GRAY = 8
 
     internal fun isWithinReliableDetectionArea(x: Int, y: Int, width: Int, height: Int): Boolean =
-        x >= (width * 0.05f).toInt() && x <= (width * 0.95f).toInt() &&
-            y >= (height * 0.12f).toInt() && y < (height * 0.88f).toInt()
+        x >= (width * 0.02f).toInt() && x <= (width * 0.98f).toInt() &&
+            y >= (height * 0.08f).toInt() && y < (height * 0.88f).toInt()
 
     internal fun touchesDetectionBoundary(
         minX: Int,
@@ -131,8 +131,8 @@ object MushroomDetector {
         maxY: Int,
         width: Int,
         height: Int
-    ): Boolean = minX <= (width * 0.05f).toInt() || maxX >= (width * 0.95f).toInt() ||
-        minY <= (height * 0.12f).toInt() || maxY >= (height * 0.88f).toInt() - 1
+    ): Boolean = minX <= (width * 0.02f).toInt() || maxX >= (width * 0.98f).toInt() ||
+        minY <= (height * 0.08f).toInt() || maxY >= (height * 0.88f).toInt() - 1
 
     /**
      * 紅菇的米黃色菇柄會形成獨立黃色連通區塊。若紅／火色菇帽就在黃色候選正上方，
@@ -184,7 +184,7 @@ object MushroomDetector {
         finally { if (scaledBitmap !== sourceBitmap) scaledBitmap.recycle() }
 
         // 僅分析可靠的地圖中段；頂端狀態列附近與畫面邊緣的局部河流容易形成假水菇。
-        val startY = (scaledH * 0.12f).toInt()
+        val startY = (scaledH * 0.08f).toInt()
         val endY = (scaledH * 0.88f).toInt()
 
         val hsv = FloatArray(3)
