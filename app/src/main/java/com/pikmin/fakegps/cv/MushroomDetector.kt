@@ -105,7 +105,8 @@ object MushroomDetector {
             MushroomType.LARGE_WATER -> width >= 35 && height >= 25 && aspect in 1.10f..2.20f &&
                 pixelCount >= 400 && dominantColorPurity <= 0.985f
             MushroomType.LARGE_CRYSTAL -> width >= 34 && height >= 34 && pixelCount >= 380
-            MushroomType.LARGE_POISON -> width >= 16 && height >= 30 && pixelCount >= 180
+            // 毒霧在河流背景與巡航動畫中容易被切成較矮色塊；以寬高比保留菇體形狀。
+            MushroomType.LARGE_POISON -> width >= 14 && height >= 20 && aspect in 0.40f..2.50f && pixelCount >= 130
             else -> false
         }
     }

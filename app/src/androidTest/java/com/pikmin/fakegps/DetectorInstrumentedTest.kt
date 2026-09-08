@@ -46,6 +46,16 @@ class DetectorInstrumentedTest {
         } finally { bitmap.recycle() }
     }
 
+    @Test fun emptyLakeScreenIsNotPoisonMushroom() {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        val bitmap = assets.open("false-positive-samples/empty-lake-poison-20260908.jpg")
+            .use { BitmapFactory.decodeStream(it) } ?: error("Cannot decode empty lake sample")
+        try {
+            val predictions = MushroomDetector.detectMushrooms(bitmap, setOf(MushroomType.LARGE_POISON))
+            assertTrue("Empty lake screen incorrectly detected as large poison mushroom: $predictions", predictions.isEmpty())
+        } finally { bitmap.recycle() }
+    }
+
     @Test fun largeElectricCruiseScreensAreDetected() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         for (filename in listOf("large-electric-cruise-1.jpg", "large-electric-cruise-2.jpg")) {
@@ -55,6 +65,32 @@ class DetectorInstrumentedTest {
                 val predictions = MushroomDetector.detectMushrooms(bitmap, setOf(MushroomType.LARGE_ELECTRIC))
                 assertTrue("$filename did not detect large electric mushroom: $predictions",
                     predictions.any { it.type == MushroomType.LARGE_ELECTRIC && it.isGiant == true })
+            } finally { bitmap.recycle() }
+        }
+    }
+
+    @Test fun largePoisonCruiseScreensAreDetected() {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        for (filename in listOf("large-poison-cruise-1.jpg", "large-poison-cruise-2.jpg")) {
+            val bitmap = assets.open("element-samples/$filename").use { BitmapFactory.decodeStream(it) }
+                ?: error("Cannot decode $filename")
+            try {
+                val predictions = MushroomDetector.detectMushrooms(bitmap, setOf(MushroomType.LARGE_POISON))
+                assertTrue("$filename did not detect large poison mushroom: $predictions",
+                    predictions.any { it.type == MushroomType.LARGE_POISON && it.isGiant == true })
+            } finally { bitmap.recycle() }
+        }
+    }
+
+    @Test fun largeWaterCruiseScreensAreDetected() {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        for (filename in listOf("large-water-cruise-1.jpg", "large-water-cruise-2.jpg")) {
+            val bitmap = assets.open("element-samples/$filename").use { BitmapFactory.decodeStream(it) }
+                ?: error("Cannot decode $filename")
+            try {
+                val predictions = MushroomDetector.detectMushrooms(bitmap, setOf(MushroomType.LARGE_WATER))
+                assertTrue("$filename did not detect large water mushroom: $predictions",
+                    predictions.any { it.type == MushroomType.LARGE_WATER && it.isGiant == true })
             } finally { bitmap.recycle() }
         }
     }

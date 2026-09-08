@@ -38,6 +38,8 @@ class ReliabilityTest {
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_CRYSTAL, 42, 40, 513))
         assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_CRYSTAL, 28, 28, 257))
         assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_POISON, 18, 35, 219))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_POISON, 18, 22, 145))
+        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_POISON, 30, 8, 145))
     }
 
     @Test fun stopInvalidatesQueuedStart() {
@@ -60,19 +62,38 @@ class ReliabilityTest {
     }
     @Test fun candidateAtDeadlineRemainsPendingUntilConfirmedOrMissed() {
         val tracker = FrameConfirmation()
+        val water = { candidate(type = MushroomType.LARGE_WATER) }
         assertFalse(tracker.hasPendingCandidate)
-        assertNull(tracker.observe(2800, listOf(candidate())))
+        assertNull(tracker.observe(2800, listOf(water())))
         assertTrue(tracker.hasPendingCandidate)
-        assertNull(tracker.observe(3050, listOf(candidate())))
-        assertNotNull(tracker.observe(3300, listOf(candidate())))
+        assertNull(tracker.observe(3050, listOf(water())))
+        assertNotNull(tracker.observe(3300, listOf(water())))
         tracker.observe(3550, emptyList())
+        assertTrue(tracker.hasPendingCandidate)
+        tracker.observe(3800, emptyList())
         assertFalse(tracker.hasPendingCandidate)
     }
-    @Test fun missedFrameResetsConfirmation() {
+    @Test fun oneAnimationFrameMissStillAllowsThreePositiveFramesToConfirm() {
+        val tracker = FrameConfirmation()
+        val water = { candidate(type = MushroomType.LARGE_WATER) }
+        tracker.observe(100, listOf(water())); tracker.observe(350, emptyList())
+        assertNull(tracker.observe(600, listOf(water())))
+        assertNotNull(tracker.observe(850, listOf(water())))
+    }
+    @Test fun poisonCandidateMustBePresentInThreeConsecutiveFrames() {
+        val tracker = FrameConfirmation()
+        val poison = { candidate(type = MushroomType.LARGE_POISON) }
+        tracker.observe(100, listOf(poison())); tracker.observe(350, emptyList())
+        assertNull(tracker.observe(600, listOf(poison())))
+        assertNull(tracker.observe(850, listOf(poison())))
+        assertNotNull(tracker.observe(1100, listOf(poison())))
+    }
+    @Test fun twoMissedFramesResetConfirmation() {
         val tracker = FrameConfirmation()
         tracker.observe(100, listOf(candidate())); tracker.observe(350, emptyList())
-        assertNull(tracker.observe(600, listOf(candidate())))
+        tracker.observe(600, emptyList())
         assertNull(tracker.observe(850, listOf(candidate())))
+        assertNull(tracker.observe(1100, listOf(candidate())))
     }
     @Test fun typeChangeDoesNotConfirmOldTarget() {
         val tracker = FrameConfirmation()

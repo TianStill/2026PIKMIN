@@ -204,7 +204,7 @@ fun DroneScannerDialog(
                             )
                             scanStatus.foundLocation?.let { loc ->
                                 Text(
-                                    text = "觀測航點：${String.format(java.util.Locale.US, "%.6f, %.6f", loc.latitude, loc.longitude)}",
+                                    text = "鎖定目標：${String.format(java.util.Locale.US, "%.6f, %.6f", loc.latitude, loc.longitude)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.outline
                                 )
@@ -230,7 +230,7 @@ fun DroneScannerDialog(
                     }
                 }
                 scanStatus.estimatedLocation?.let { estimate ->
-                    Text("未校正估算：${String.format(java.util.Locale.US, "%.5f, %.5f", estimate.latitude, estimate.longitude)}；不自動跳轉，誤差尚未量測",
+                    Text("目標估算：${String.format(java.util.Locale.US, "%.5f, %.5f", estimate.latitude, estimate.longitude)}；已鎖定此座標",
                         style = MaterialTheme.typography.bodySmall)
                 }
                 // 2. 搜尋半徑選擇 (Radius)
@@ -506,7 +506,7 @@ fun DroneScannerDialog(
                         Text(text = "🧭", fontSize = 20.sp)
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "貼心提醒：啟動巡航前，請先點擊遊戲畫面中的「指南針」圖示將地圖回正為正北，估算假設畫面寬度代表 450 公尺，尚未校正。發現候選後停在觀測航點，請自行確認。",
+                            text = "貼心提醒：啟動巡航前，請先點擊遊戲畫面中的「指南針」圖示將地圖回正為正北。發現候選後會依畫面位置估算並鎖定目標座標，仍請在遊戲內確認。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                             lineHeight = 16.sp

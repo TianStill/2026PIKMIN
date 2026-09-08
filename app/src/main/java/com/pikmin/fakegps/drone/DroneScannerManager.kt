@@ -511,6 +511,11 @@ object DroneScannerManager {
                 if (captureGeneration == captureToken) {
                     releaseWakeLock()
                     releaseCapture()
+                    // 關閉 MediaProjection 會切換前景服務型態；找到目標後再次送出鎖定座標，
+                    // 避免遊戲短暫讀到真實位置或舊巡航航點。
+                    _status.value.estimatedLocation?.takeIf { _status.value.phase == ScanPhase.FOUND }?.let {
+                        MockLocationService.updateLocation(appContext, it)
+                    }
                 }
             }
         }
@@ -571,7 +576,9 @@ object DroneScannerManager {
     ) {
         val label = MushroomType.getDisplayName(target.type)
         val estimatedLocation = estimateMushroomLocation(location, target)
-        check(MockLocationService.updateLocation(context, location)) { "目標已辨識，但定位已停止，無法保持觀測航點" }
+        check(MockLocationService.updateLocation(context, estimatedLocation)) {
+            "目標已辨識，但定位已停止，無法鎖定目標位置"
+        }
 
         val discovered = DiscoveredMushroomPoint(
             typeName = target.type.name,
@@ -585,15 +592,15 @@ object DroneScannerManager {
             phase = ScanPhase.FOUND,
             isScanning = false,
             foundTarget = target,
-            foundLocation = location,
+            foundLocation = estimatedLocation,
             estimatedLocation = estimatedLocation,
-            statusMessage = "發現候選【$label】，已停在觀測航點；請在遊戲內確認種類與大小"
+            statusMessage = "發現候選【$label】，已鎖定估算目標位置；請在遊戲內確認"
         )
 
-        // Keep the observation waypoint. An uncalibrated pixel estimate must not trigger a teleport.
-        prefs.lastLatitude = location.latitude
-        prefs.lastLongitude = location.longitude
-        prefs.addHistory(location.latitude, location.longitude, "候選觀測點 $label")
+        // 所有持久狀態與通知統一使用鎖定的目標位置，避免服務重建時回到巡航航點。
+        prefs.lastLatitude = estimatedLocation.latitude
+        prefs.lastLongitude = estimatedLocation.longitude
+        prefs.addHistory(estimatedLocation.latitude, estimatedLocation.longitude, "找到目標 $label")
 
         // 1. 手機多段強震動提示
         try {
@@ -609,7 +616,7 @@ object DroneScannerManager {
         }
 
         // 2. 發送最高優先級 Heads-up 橫幅通知
-        showHeadsUpNotification(context, label, location)
+        showHeadsUpNotification(context, label, estimatedLocation)
 
         // 3. 背景 Toast (若系統支援)
         try {
