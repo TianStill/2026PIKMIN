@@ -17,6 +17,25 @@ import org.junit.Test
 import java.io.File
 
 class DetectorInstrumentedTest {
+    @Test fun normalElementReferencesAreRejected() {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        val samples = listOf(
+            "normal-electric.jpg" to MushroomType.LARGE_ELECTRIC,
+            "normal-poison.jpg" to MushroomType.LARGE_POISON,
+            "normal-fire.jpg" to MushroomType.LARGE_FIRE,
+            "normal-water.png" to MushroomType.LARGE_WATER,
+            "normal-crystal.jpg" to MushroomType.LARGE_CRYSTAL
+        )
+        for ((filename, expected) in samples) {
+            val bitmap = assets.open("element-samples/$filename").use { BitmapFactory.decodeStream(it) }
+                ?: error("Cannot decode $filename")
+            try {
+                val predictions = MushroomDetector.detectMushrooms(bitmap, setOf(expected))
+                assertTrue("$filename incorrectly detected as large $expected: $predictions", predictions.isEmpty())
+            } finally { bitmap.recycle() }
+        }
+    }
+
     @Test fun allLargeElementReferencesDetectAtSourceAndCruiseResolution() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         val samples = listOf(
@@ -32,7 +51,7 @@ class DetectorInstrumentedTest {
             try {
                 val sourcePredictions = MushroomDetector.detectMushrooms(bitmap, setOf(expected))
                 assertTrue("$filename source did not detect $expected: $sourcePredictions",
-                    sourcePredictions.any { it.type == expected })
+                    sourcePredictions.any { it.type == expected && it.isGiant == true })
                 val cruise = Bitmap.createScaledBitmap(
                     bitmap,
                     720,
@@ -40,9 +59,9 @@ class DetectorInstrumentedTest {
                     true
                 )
                 try {
-                    val cruisePredictions = MushroomDetector.detectMushrooms(cruise, setOf(expected))
-                    assertTrue("$filename cruise-size did not detect $expected: $cruisePredictions",
-                        cruisePredictions.any { it.type == expected })
+                val cruisePredictions = MushroomDetector.detectMushrooms(cruise, setOf(expected))
+                assertTrue("$filename cruise-size did not detect $expected: $cruisePredictions",
+                        cruisePredictions.any { it.type == expected && it.isGiant == true })
                 } finally { if (cruise !== bitmap) cruise.recycle() }
             } finally { bitmap.recycle() }
         }
@@ -86,12 +105,12 @@ class DetectorInstrumentedTest {
         } finally { bitmap.recycle() }
     }
 
-    @Test fun colorCandidateDoesNotClaimKnownSize() {
+    @Test fun largeColorCandidateDoesNotClaimKnownSize() {
         val bitmap = Bitmap.createBitmap(480, 640, Bitmap.Config.ARGB_8888)
         try {
             bitmap.eraseColor(Color.GREEN)
-            Canvas(bitmap).drawRect(70f, 200f, 115f, 225f, Paint().apply { color = Color.RED })
-            val found = MushroomDetector.detectMushrooms(bitmap)
+            Canvas(bitmap).drawRect(70f, 200f, 115f, 225f, Paint().apply { color = Color.rgb(147, 51, 234) })
+            val found = MushroomDetector.detectMushrooms(bitmap, setOf(MushroomType.LARGE_PURPLE))
             assertTrue(found.isNotEmpty())
             assertTrue(found.all { it.isGiant == null })
         } finally { bitmap.recycle() }

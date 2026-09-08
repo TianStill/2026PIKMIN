@@ -20,7 +20,7 @@
 ### 3. 無人機自動巡航與五大元素蘑菇辨識 (`DroneScanner` & `MushroomDetector`)
 - **螺旋航路擴散飛行 (`DronePathGenerator`)**：自設定中心點依設定步長與搜尋半徑，由內向外螺旋推算最佳無人機掃描航點。
 - **五大特殊元素蘑菇精準辨識**：
-  - 支援 **大型火 (Large Fire)**、**大型水 (Large Water)**、**大型電 (Large Electric)**、**大型毒 (Large Poison)**、**大型水晶 (Large Crystal)** 五大特殊元素蘑菇。
+  - 支援 **大型火 (Large Fire)**、**大型水 (Large Water)**、**大型電 (Large Electric)**、**大型毒 (Large Poison)**、**大型水晶 (Large Crystal)** 五大元素蘑菇；以固定最遠地圖視角的成對樣本校準，一般元素菇與大小不明候選不提醒。
   - 結合 HSV 色彩空間特徵、色彩純度與連通幾何輪廓分析。
 - **多影格一致性確認 (`FrameConfirmation`)**：
   - 必須連續取得 **3 個獨立不同新影格** 且判定一致方確認為目標蘑菇，杜絕瞬間畫面噪點或背景地形誤判。

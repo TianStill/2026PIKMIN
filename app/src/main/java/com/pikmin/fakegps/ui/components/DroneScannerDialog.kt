@@ -255,7 +255,7 @@ fun DroneScannerDialog(
                     }
                 }
 
-                // 3. 目標蘑菇分類選擇 (巨大活動菇 / 大顏色菇 / 大元素菇)
+                // 3. 目標蘑菇分類選擇
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),

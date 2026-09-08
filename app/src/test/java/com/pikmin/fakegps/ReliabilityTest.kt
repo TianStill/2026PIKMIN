@@ -19,6 +19,23 @@ class ReliabilityTest {
         assertTrue(MushroomType.DEFAULT_CRUISE_TARGETS.all { it.category == MushroomCategory.LARGE_ELEMENT })
         assertFalse(MushroomType.DEFAULT_CRUISE_TARGETS.contains(MushroomType.LARGE_RED))
     }
+    @Test fun largeElementLabelsClaimCalibratedSize() {
+        val label = MushroomType.getDisplayName(MushroomType.LARGE_WATER)
+        assertTrue(label.contains("大水蘑菇"))
+        assertFalse(label.contains("大小待確認"))
+    }
+
+    @Test fun calibratedElementShapeThresholdsSeparateKnownPairs() {
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 34, 33, 421))
+        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_ELECTRIC, 37, 22, 521))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_FIRE, 47, 32, 797))
+        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_FIRE, 38, 23, 454))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_WATER, 42, 28, 538))
+        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_WATER, 23, 51, 313))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_CRYSTAL, 42, 40, 513))
+        assertFalse(MushroomDetector.isLargeElementShape(MushroomType.LARGE_CRYSTAL, 28, 28, 257))
+        assertTrue(MushroomDetector.isLargeElementShape(MushroomType.LARGE_POISON, 18, 35, 219))
+    }
 
     @Test fun stopInvalidatesQueuedStart() {
         val gate = SessionGate(); val token = gate.begin(); gate.stop()

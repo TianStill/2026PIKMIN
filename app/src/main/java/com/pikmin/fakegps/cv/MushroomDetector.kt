@@ -6,7 +6,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 蘑菇分類大項 (僅鎖定：大元素菇、大顏色菇)
+ * 蘑菇分類大項
  */
 enum class MushroomCategory(val title: String) {
     LARGE_ELEMENT("大元素菇"),
@@ -14,7 +14,7 @@ enum class MushroomCategory(val title: String) {
 }
 
 /**
- * 蘑菇目標種類枚舉 (僅鎖定：大元素菇、大顏色菇)
+ * 蘑菇目標種類枚舉
  */
 enum class MushroomType(
     val title: String,
@@ -22,12 +22,12 @@ enum class MushroomType(
     val category: MushroomCategory,
     val colorHex: Long
 ) {
-    // ⚡ 1. 大元素菇 (每一種元素)
+    // ⚡ 1. 大元素菇（固定最遠地圖視角校準）
     LARGE_ELECTRIC("大電蘑菇 ⚡", "大電菇", MushroomCategory.LARGE_ELEMENT, 0xFFFACC15),
-    LARGE_FIRE("火蘑菇 🔥", "火菇", MushroomCategory.LARGE_ELEMENT, 0xFFFF4500),
-    LARGE_WATER("水蘑菇 💧", "水菇", MushroomCategory.LARGE_ELEMENT, 0xFF06B6D4),
-    LARGE_CRYSTAL("水晶蘑菇 💎", "水晶菇", MushroomCategory.LARGE_ELEMENT, 0xFFA5F3FC),
-    LARGE_POISON("毒蘑菇 🧪", "毒菇", MushroomCategory.LARGE_ELEMENT, 0xFFA855F7),
+    LARGE_FIRE("大火蘑菇 🔥", "大火菇", MushroomCategory.LARGE_ELEMENT, 0xFFFF4500),
+    LARGE_WATER("大水蘑菇 💧", "大水菇", MushroomCategory.LARGE_ELEMENT, 0xFF06B6D4),
+    LARGE_CRYSTAL("大水晶蘑菇 💎", "大水晶菇", MushroomCategory.LARGE_ELEMENT, 0xFFA5F3FC),
+    LARGE_POISON("大毒蘑菇 🧪", "大毒菇", MushroomCategory.LARGE_ELEMENT, 0xFFA855F7),
 
     // 🌈 2. 大顏色菇 (每一種顏色)
     LARGE_RED("大紅蘑菇", "大紅菇", MushroomCategory.LARGE_COLOR, 0xFFEF4444),
@@ -65,7 +65,7 @@ data class DetectedMushroom(
     val y: Int,
     val radius: Int,
     val confidence: Float,
-    val isGiant: Boolean? = null // Size is unknown without distance/zoom calibration.
+    val isGiant: Boolean? = null
 )
 
 /**
@@ -83,6 +83,23 @@ private data class ClusterThresholds(
  * Pikmin Bloom 地圖蘑菇電腦視覺 (CV) 檢測核心 (高靈敏度連通群集 + 色票直方圖投票架構)
  */
 object MushroomDetector {
+
+    /**
+     * 固定最遠視角下，各元素菇以 640px 長邊影像校準的「大型」輪廓。
+     * 門檻取自成對的大型／一般真機截圖；無法明確落在大型區間時一律拒絕。
+     */
+    internal fun isLargeElementShape(type: MushroomType, width: Int, height: Int, pixelCount: Int): Boolean {
+        if (type.category != MushroomCategory.LARGE_ELEMENT || width <= 0 || height <= 0) return false
+        val aspect = width.toFloat() / height.toFloat()
+        return when (type) {
+            MushroomType.LARGE_ELECTRIC -> height >= 28 && aspect in 0.75f..1.30f && pixelCount >= 320
+            MushroomType.LARGE_FIRE -> width >= 43 && height >= 28 && pixelCount >= 620
+            MushroomType.LARGE_WATER -> width >= 35 && height >= 25 && aspect in 1.10f..2.20f && pixelCount >= 400
+            MushroomType.LARGE_CRYSTAL -> width >= 34 && height >= 34 && pixelCount >= 380
+            MushroomType.LARGE_POISON -> width >= 16 && height >= 30 && pixelCount >= 180
+            else -> false
+        }
+    }
 
     // 色彩家族分組 (同一家族色彩才連通聚合，徹底防止白色道路與藍色河流串接誤判)
     private const val FAM_FIRE_RED = 1
@@ -300,8 +317,7 @@ object MushroomDetector {
                     }
 
                     // 🌟 類別感知型門檻 (Category-Aware Thresholds)：
-                    // 1. 大元素菇 (電、火、水、水晶、毒)：遊戲內無普通小型版本！
-                    //    巡航航點間距 300m 時，遠距離 (200~320m) 渲染之元素菇需精確捕捉並及時煞車。
+                    // 1. 大元素菇：先通過基本色彩門檻，再套用各元素的固定遠視角大型輪廓校準。
                     // 2. 大顏色菇 (紅、黃、藍、紫、白、粉、灰)：遊戲內有 5 人挑戰之普通小型顏色菇，需嚴格排除。
                     val thresholds = when (dominantType.category) {
                         MushroomCategory.LARGE_ELEMENT -> ClusterThresholds(
@@ -324,6 +340,11 @@ object MushroomDetector {
                     if (bboxW < thresholds.minBboxW || bboxH < thresholds.minBboxH || bboxArea < thresholds.minBboxArea) continue
                     if (fillRatio < thresholds.minFillRatio) continue
 
+                    if (dominantType.category == MushroomCategory.LARGE_ELEMENT &&
+                        !isLargeElementShape(dominantType, bboxW, bboxH, count)) {
+                        continue
+                    }
+
                     val origX = ((sumX / count) / scale).toInt()
                     val origY = ((sumY / count) / scale).toInt()
 
@@ -336,7 +357,7 @@ object MushroomDetector {
                     }
 
                     val radius = (max(bboxW, bboxH) / (1.8f * scale)).toInt().coerceAtLeast(24)
-                    val isGiant: Boolean? = null
+                    val isGiant = if (dominantType.category == MushroomCategory.LARGE_ELEMENT) true else null
 
                     val confidence = purity // Color match score, not a calibrated probability.
 
