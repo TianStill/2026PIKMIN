@@ -70,7 +70,9 @@ data class DroneCruiseProfile(
         val STANDARD = DroneCruiseProfile(1, "🚀 推薦標準", "300m / 2.8s", 300.0, 2.8f)
         val PRECISE = DroneCruiseProfile(2, "🎯 精細搜尋", "240m / 3.5s", 240.0, 3.5f)
 
-        val ALL = listOf(FAST, STANDARD, PRECISE)
+        val SPEED_18KMH = DroneCruiseProfile(3, "🚲 18km/hr", "200m / 2.5s", 200.0, 2.5f)
+
+        val ALL = listOf(FAST, STANDARD, PRECISE, SPEED_18KMH)
 
         fun getById(id: Int): DroneCruiseProfile = ALL.find { it.modeId == id } ?: STANDARD
     }
@@ -318,7 +320,7 @@ object DroneScannerManager {
         dwellSeconds: Float = 2.8f,
         stepMeters: Double = 300.0
     ) {
-        if (targetTypes.isEmpty()) { fail("請至少選擇一種目標"); return }
+        val isPureCruise = targetTypes.isEmpty()
 
         val waypoints = DronePathGenerator.generateSpiralWaypoints(
             centerLat = centerLat,
@@ -334,7 +336,7 @@ object DroneScannerManager {
 
         Toast.makeText(
             context,
-            "🛸 無人機出發！請確認遊戲地圖已點擊「指南針」回正正北！",
+            if (isPureCruise) "🛸 無人機出發（純巡航模式）！請確認遊戲地圖已點擊「指南針」回正正北！" else "🛸 無人機出發！請確認遊戲地圖已點擊「指南針」回正正北！",
             Toast.LENGTH_SHORT
         ).show()
 
@@ -402,17 +404,19 @@ object DroneScannerManager {
         analysisTrace.clear()
         _status.value = DroneScanStatus(phase = ScanPhase.WAITING_FOR_FRAME, isScanning = true,
             totalPoints = waypoints.size, currentIndex = startIndex,
-            statusMessage = "請切換至遊戲地圖，3 秒後開始；請保持正北與固定縮放")
+            statusMessage = if (targetTypes.isEmpty()) "正在啟動純巡航，3 秒後出發..." else "請切換至遊戲地圖，3 秒後開始；請保持正北與固定縮放")
         openPikminBloom(context)
         scanJob = scope.launch {
             var wakeRenewal: Job? = null
             try {
-                withContext(Dispatchers.IO) {
-                    DroneDiagnosticRecorder.startSession(
-                        appContext,
-                        targetTypes.map { it.name }.toSet(),
-                        waypoints.size
-                    )
+                if (targetTypes.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        DroneDiagnosticRecorder.startSession(
+                            appContext,
+                            targetTypes.map { it.name }.toSet(),
+                            waypoints.size
+                        )
+                    }
                 }
                 acquireWakeLock(appContext)
                 wakeRenewal = launch {
@@ -423,7 +427,8 @@ object DroneScannerManager {
                     }
                 }
                 delay(3000)
-                val readyAfter = SystemClock.elapsedRealtime()
+                if (targetTypes.isNotEmpty()) {
+                    val readyAfter = SystemClock.elapsedRealtime()
                 withTimeout(5000) {
                     while (true) {
                         val frame = captureCurrentScreen(readyAfter)
@@ -438,13 +443,19 @@ object DroneScannerManager {
                         delay(100)
                     }
                 }
+                }
                 for (index in startIndex until waypoints.size) {
                     ensureActive()
                     currentStartIndex = index // On interruption, retry the unanalysed waypoint.
                     val waypoint = waypoints[index]
                     check(MockLocationService.updateLocation(appContext, waypoint)) { "定位已停止" }
                     _status.value = _status.value.copy(phase = ScanPhase.SCANNING, currentIndex = index + 1,
-                        currentCoordinate = waypoint, statusMessage = "正在分析航點 ${index + 1}/${waypoints.size}")
+                        currentCoordinate = waypoint, statusMessage = if (targetTypes.isEmpty()) "正在純巡航航點 ${index + 1}/${waypoints.size}" else "正在分析航點 ${index + 1}/${waypoints.size}")
+                    if (targetTypes.isEmpty()) {
+                        delay((dwellSeconds * 1000).toLong().coerceAtLeast(1000))
+                        currentStartIndex = index + 1
+                        continue
+                    }
                     delay(1200)
                     val minimumFrameTime = SystemClock.elapsedRealtime()
                     val deadline = minimumFrameTime + (dwellSeconds * 1000).toLong().coerceAtLeast(1400)
@@ -510,7 +521,7 @@ object DroneScannerManager {
                     currentStartIndex = index + 1
                 }
                 _status.value = _status.value.copy(phase = ScanPhase.COMPLETED, isScanning = false,
-                    statusMessage = "本輪分析完成，未找到更多符合條件的候選目標")
+                    statusMessage = if (targetTypes.isEmpty()) "無人機純巡航完成！" else "本輪分析完成，未找到更多符合條件的候選目標")
             } catch (e: TimeoutCancellationException) {
                 _status.value = _status.value.copy(phase = ScanPhase.ERROR, isScanning = false,
                     statusMessage = "沒有新的遊戲畫面，請重新授權後續航")

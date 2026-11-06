@@ -313,18 +313,109 @@ fun DroneScannerDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("🍄 目標蘑菇種類 (多選)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = if (selectedTypes.isEmpty()) "目前：無 (純巡航)" else "已選 ${selectedTypes.size} 種",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selectedTypes.isEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 快速模式列：[🚫 無 (純巡航)] [全選] [⚡ 僅元素] [🌈 僅顏色]
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val isNone = selectedTypes.isEmpty()
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isNone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = if (isNone) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            modifier = Modifier
+                                .weight(1.15f)
+                                .clickable { selectedTypes = emptySet() }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "🚫 無 (純巡航)",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isNone) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isNone) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        val isAll = selectedTypes.size == MushroomType.ALL_TARGETS.size
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isAll) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = if (isAll) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            modifier = Modifier
+                                .weight(0.75f)
+                                .clickable { selectedTypes = MushroomType.ALL_TARGETS }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "全選",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isAll) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isAll) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        val isElement = selectedTypes == MushroomType.ELEMENT_TARGETS
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isElement) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = if (isElement) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            modifier = Modifier
+                                .weight(0.95f)
+                                .clickable { selectedTypes = MushroomType.ELEMENT_TARGETS }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "⚡ 僅元素",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isElement) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isElement) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        val isColor = selectedTypes == MushroomType.COLOR_TARGETS
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isColor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = if (isColor) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            modifier = Modifier
+                                .weight(0.95f)
+                                .clickable { selectedTypes = MushroomType.COLOR_TARGETS }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "🌈 僅顏色",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isColor) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isColor) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    if (selectedTypes.isEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text(
-                                text = if (selectedTypes.size == MushroomType.ALL_TARGETS.size) "取消全選" else "全選",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.clickable {
-                                    selectedTypes = if (selectedTypes.size == MushroomType.ALL_TARGETS.size) {
-                                        setOf(MushroomType.LARGE_ELECTRIC)
-                                    } else {
-                                        MushroomType.ALL_TARGETS
-                                    }
-                                }
+                                text = "ℹ️ 已選擇「無」：無人機將純路徑巡弋，不進行蘑菇辨識且不煞車停靠。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
                         }
                     }
@@ -363,7 +454,7 @@ fun DroneScannerDialog(
                                             .weight(1f)
                                             .clickable {
                                                 selectedTypes = if (isSelected) {
-                                                    if (selectedTypes.size > 1) selectedTypes - type else selectedTypes
+                                                    selectedTypes - type
                                                 } else {
                                                     selectedTypes + type
                                                 }
@@ -426,7 +517,7 @@ fun DroneScannerDialog(
                                             .weight(1f)
                                             .clickable {
                                                 selectedTypes = if (isSelected) {
-                                                    if (selectedTypes.size > 1) selectedTypes - type else selectedTypes
+                                                    selectedTypes - type
                                                 } else {
                                                     selectedTypes + type
                                                 }
@@ -458,41 +549,45 @@ fun DroneScannerDialog(
                 // 4. 巡弋速度模式與每點停留時間
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("⚡ 巡航速度模式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        DroneCruiseProfile.ALL.forEach { profile ->
-                            val isSelected = speedMode == profile.modeId
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
-                                        speedMode = profile.modeId
-                                        stepMeters = profile.stepMeters
-                                        dwellSeconds = profile.dwellSeconds
-                                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DroneCruiseProfile.ALL.chunked(2).forEach { rowProfiles ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = profile.title,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = profile.subtitle,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f) else MaterialTheme.colorScheme.outline,
-                                        fontSize = 10.5.sp
-                                    )
+                                rowProfiles.forEach { profile ->
+                                    val isSelected = speedMode == profile.modeId
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                speedMode = profile.modeId
+                                                stepMeters = profile.stepMeters
+                                                dwellSeconds = profile.dwellSeconds
+                                            }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = profile.title,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = profile.subtitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f) else MaterialTheme.colorScheme.outline,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -602,12 +697,12 @@ fun DroneScannerDialog(
                     onClick = {
                         onStartDroneScan(selectedRadiusKm!!, selectedTypes, dwellSeconds, stepMeters)
                     },
-                    enabled = radiusIsValid && selectedTypes.isNotEmpty(),
+                    enabled = radiusIsValid,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("啟動無人機掃描")
+                    Text(if (selectedTypes.isEmpty()) "啟動無人機純巡航" else "啟動無人機掃描")
                 }
             }
         },

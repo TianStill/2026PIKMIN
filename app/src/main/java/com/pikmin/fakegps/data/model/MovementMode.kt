@@ -10,6 +10,7 @@ enum class MovementMode(
 ) {
     WALK("步行", 4.0, (4.0 / 3.6).toFloat()),
     RUN("跑步", 10.0, (10.0 / 3.6).toFloat()),
+    SPEED_18("18km/hr", 18.0, (18.0 / 3.6).toFloat()),
     BIKE("騎車", 25.0, (25.0 / 3.6).toFloat()),
     DRIVE("開車", 50.0, (50.0 / 3.6).toFloat());
 

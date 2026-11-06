@@ -161,6 +161,7 @@ object MushroomDetector {
         sourceBitmap: Bitmap,
         targetTypes: Set<MushroomType> = MushroomType.ALL_TARGETS
     ): List<DetectedMushroom> {
+        if (targetTypes.isEmpty()) return emptyList()
         val width = sourceBitmap.width
         val height = sourceBitmap.height
 

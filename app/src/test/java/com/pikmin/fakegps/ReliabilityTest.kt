@@ -7,6 +7,7 @@ import com.pikmin.fakegps.update.*
 import com.pikmin.fakegps.utils.GeoUtils
 import com.pikmin.fakegps.data.model.DiscoveredMushroomPoint
 import com.pikmin.fakegps.data.model.LocationPoint
+import com.pikmin.fakegps.data.model.MovementMode
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -176,6 +177,27 @@ class ReliabilityTest {
         val point = GeoUtils.extractCoordinatesFromText("一般活動菇 免4\n52.408297,16.93426666")!!
         assertEquals(52.408297, point.latitude, 0.0000001); assertTrue(point.note.contains("免4"))
     }
+    @Test fun droneCruiseProfilesInclude18KmhMode() {
+        val profile18 = DroneCruiseProfile.getById(3)
+        assertEquals(3, profile18.modeId)
+        assertTrue(profile18.title.contains("18km/hr") || profile18.title.contains("18 km/h"))
+        assertTrue(DroneCruiseProfile.ALL.any { it.modeId == 3 })
+    }
+    @Test fun movementModeIncludes18Kmh() {
+        assertEquals(18.0, MovementMode.SPEED_18.speedKmh, 0.001)
+        assertEquals(MovementMode.SPEED_18, MovementMode.fromSpeedKmh(18.0))
+    }
+    @Test fun emptyTargetTypesReturnsEmptyCandidateList() {
+        val bitmapClass = Class.forName("android.graphics.Bitmap")
+        val unsafeClass = Class.forName("sun.misc.Unsafe")
+        val field = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }
+        val unsafe = field.get(null)
+        val allocateMethod = unsafeClass.getMethod("allocateInstance", Class::class.java)
+        val dummyBitmap = allocateMethod.invoke(unsafe, bitmapClass) as android.graphics.Bitmap
+        val result = MushroomDetector.detectMushrooms(dummyBitmap, emptySet())
+        assertTrue(result.isEmpty())
+    }
+
     @Test fun jitterRemainsWithinConfiguredRadius() {
         repeat(100) {
             val (lat, lng) = GeoUtils.applyRealisticJitter(25.0, 121.0, 0.4)
