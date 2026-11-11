@@ -38,6 +38,8 @@ import com.pikmin.fakegps.cv.DetectedMushroom
 import com.pikmin.fakegps.cv.MushroomCategory
 import com.pikmin.fakegps.cv.MushroomDetector
 import com.pikmin.fakegps.cv.MushroomType
+import com.pikmin.fakegps.data.model.DroneScanPreferences
+import com.pikmin.fakegps.data.repository.PreferencesRepo
 import com.pikmin.fakegps.drone.DroneCruiseProfile
 import com.pikmin.fakegps.drone.DronePathGenerator
 import com.pikmin.fakegps.drone.DroneScannerManager
@@ -77,8 +79,11 @@ fun DroneScannerDialog(
         }
     }
 
-    var radiusMode by remember { mutableStateOf("3") }
-    var customRadiusText by remember { mutableStateOf("8") }
+    val prefsRepo = remember { PreferencesRepo(context) }
+    val initialPrefs = remember { prefsRepo.getDroneScanPreferences() }
+
+    var radiusMode by remember { mutableStateOf(initialPrefs.radiusMode) }
+    var customRadiusText by remember { mutableStateOf(initialPrefs.customRadiusText) }
     val selectedRadiusKm = when (radiusMode) {
         "3" -> 3.0
         "5" -> 5.0
@@ -86,11 +91,38 @@ fun DroneScannerDialog(
     }
     val radiusIsValid = selectedRadiusKm != null &&
         selectedRadiusKm in DronePathGenerator.MIN_RADIUS_KM..DronePathGenerator.MAX_RADIUS_KM
-    var selectedTypes by remember { mutableStateOf(MushroomType.DEFAULT_CRUISE_TARGETS) }
-    var speedMode by remember { mutableStateOf(DroneCruiseProfile.STANDARD.modeId) }
-    var dwellSeconds by remember { mutableStateOf(DroneCruiseProfile.STANDARD.dwellSeconds) }
-    var stepMeters by remember { mutableStateOf(DroneCruiseProfile.STANDARD.stepMeters) }
-    var cruiseSpeedMps by remember { mutableStateOf(5f) }
+
+    val initialTargetTypes = remember {
+        if (initialPrefs.hasSavedTargetTypes) {
+            MushroomType.entries.filter { it.name in initialPrefs.targetTypeNames }.toSet()
+        } else {
+            MushroomType.DEFAULT_CRUISE_TARGETS
+        }
+    }
+    var selectedTypes by remember { mutableStateOf(initialTargetTypes) }
+    var speedMode by remember { mutableStateOf(initialPrefs.speedMode) }
+    var dwellSeconds by remember { mutableStateOf(initialPrefs.dwellSeconds) }
+    var stepMeters by remember { mutableStateOf(initialPrefs.stepMeters) }
+    var cruiseSpeedMps by remember { mutableStateOf(initialPrefs.cruiseSpeedMps) }
+
+    val saveCurrentPreferences = {
+        prefsRepo.saveDroneScanPreferences(
+            DroneScanPreferences(
+                radiusMode = radiusMode,
+                customRadiusText = customRadiusText,
+                targetTypeNames = selectedTypes.map { it.name }.toSet(),
+                hasSavedTargetTypes = true,
+                speedMode = speedMode,
+                dwellSeconds = dwellSeconds,
+                stepMeters = stepMeters,
+                cruiseSpeedMps = cruiseSpeedMps
+            )
+        )
+    }
+
+    LaunchedEffect(radiusMode, customRadiusText, selectedTypes, speedMode, dwellSeconds, stepMeters, cruiseSpeedMps) {
+        saveCurrentPreferences()
+    }
 
     // 相片辨識測試狀態
     var testBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -741,6 +773,7 @@ fun DroneScannerDialog(
             } else {
                 Button(
                     onClick = {
+                        saveCurrentPreferences()
                         val effectiveSpeed = if (speedMode == DroneCruiseProfile.SMOOTH_CRUISE.modeId) cruiseSpeedMps else 0f
                         onStartDroneScan(selectedRadiusKm!!, selectedTypes, dwellSeconds, stepMeters, effectiveSpeed)
                     },
@@ -754,7 +787,10 @@ fun DroneScannerDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = {
+                saveCurrentPreferences()
+                onDismiss()
+            }) {
                 Text("關閉")
             }
         }

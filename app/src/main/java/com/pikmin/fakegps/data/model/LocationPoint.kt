@@ -46,3 +46,17 @@ data class DiscoveredMushroomPoint(
     val longitude: Double,
     val discoveredAt: Long = System.currentTimeMillis()
 ) : Serializable
+
+/**
+ * 無人機尋菇雷達使用者偏好設定資料模型（保留上一次設定）
+ */
+data class DroneScanPreferences(
+    val radiusMode: String = "3",
+    val customRadiusText: String = "8",
+    val targetTypeNames: Set<String> = emptySet(),
+    val hasSavedTargetTypes: Boolean = false,
+    val speedMode: Int = 1,
+    val dwellSeconds: Float = 2.8f,
+    val stepMeters: Double = 300.0,
+    val cruiseSpeedMps: Float = 5f
+) : Serializable

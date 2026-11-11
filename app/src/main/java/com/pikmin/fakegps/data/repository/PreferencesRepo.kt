@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.pikmin.fakegps.data.model.BookmarkPoint
 import com.pikmin.fakegps.data.model.LocationHistoryPoint
 import com.pikmin.fakegps.data.model.DiscoveredMushroomPoint
+import com.pikmin.fakegps.data.model.DroneScanPreferences
 import com.pikmin.fakegps.data.model.MovementMode
 import org.json.JSONArray
 import org.json.JSONObject
@@ -32,6 +33,13 @@ class PreferencesRepo(context: Context) {
         private const val KEY_BOOKMARKS = "key_bookmarks_json"
         private const val KEY_HISTORY = "key_location_history_json"
         private const val KEY_DISCOVERED_MUSHROOMS = "key_discovered_mushrooms_json"
+        private const val KEY_DRONE_RADIUS_MODE = "key_drone_radius_mode"
+        private const val KEY_DRONE_CUSTOM_RADIUS = "key_drone_custom_radius"
+        private const val KEY_DRONE_TARGET_TYPES = "key_drone_target_types_json"
+        private const val KEY_DRONE_SPEED_MODE = "key_drone_speed_mode"
+        private const val KEY_DRONE_DWELL_SECONDS = "key_drone_dwell_seconds"
+        private const val KEY_DRONE_STEP_METERS = "key_drone_step_meters"
+        private const val KEY_DRONE_CRUISE_SPEED_MPS = "key_drone_cruise_speed_mps"
         private const val MAX_DISCOVERED_MUSHROOMS = 200
 
         // 預設台北 101 座標
@@ -270,5 +278,61 @@ class PreferencesRepo(context: Context) {
             })
         }
         prefs.edit().putString(KEY_DISCOVERED_MUSHROOMS, array.toString()).apply()
+    }
+
+    // ===== 無人機尋菇雷達偏好設定（保留上一次設定） =====
+    fun getDroneScanPreferences(): DroneScanPreferences {
+        val radiusMode = prefs.getString(KEY_DRONE_RADIUS_MODE, "3") ?: "3"
+        val customRadiusText = prefs.getString(KEY_DRONE_CUSTOM_RADIUS, "8") ?: "8"
+        val hasSavedTargetTypes = prefs.contains(KEY_DRONE_TARGET_TYPES)
+        val targetTypeNames = if (hasSavedTargetTypes) {
+            val jsonStr = prefs.getString(KEY_DRONE_TARGET_TYPES, null)
+            if (jsonStr != null) {
+                try {
+                    val array = JSONArray(jsonStr)
+                    buildSet {
+                        for (i in 0 until array.length()) {
+                            add(array.getString(i))
+                        }
+                    }
+                } catch (e: Exception) {
+                    emptySet()
+                }
+            } else {
+                emptySet()
+            }
+        } else {
+            emptySet()
+        }
+
+        val speedMode = prefs.getInt(KEY_DRONE_SPEED_MODE, 1)
+        val dwellSeconds = prefs.getFloat(KEY_DRONE_DWELL_SECONDS, 2.8f)
+        val stepMeters = prefs.getString(KEY_DRONE_STEP_METERS, "300.0")?.toDoubleOrNull() ?: 300.0
+        val cruiseSpeedMps = prefs.getFloat(KEY_DRONE_CRUISE_SPEED_MPS, 5f)
+
+        return DroneScanPreferences(
+            radiusMode = radiusMode,
+            customRadiusText = customRadiusText,
+            targetTypeNames = targetTypeNames,
+            hasSavedTargetTypes = hasSavedTargetTypes,
+            speedMode = speedMode,
+            dwellSeconds = dwellSeconds,
+            stepMeters = stepMeters,
+            cruiseSpeedMps = cruiseSpeedMps
+        )
+    }
+
+    fun saveDroneScanPreferences(pref: DroneScanPreferences) {
+        val jsonArray = JSONArray()
+        pref.targetTypeNames.forEach { jsonArray.put(it) }
+        prefs.edit()
+            .putString(KEY_DRONE_RADIUS_MODE, pref.radiusMode)
+            .putString(KEY_DRONE_CUSTOM_RADIUS, pref.customRadiusText)
+            .putString(KEY_DRONE_TARGET_TYPES, jsonArray.toString())
+            .putInt(KEY_DRONE_SPEED_MODE, pref.speedMode)
+            .putFloat(KEY_DRONE_DWELL_SECONDS, pref.dwellSeconds)
+            .putString(KEY_DRONE_STEP_METERS, pref.stepMeters.toString())
+            .putFloat(KEY_DRONE_CRUISE_SPEED_MPS, pref.cruiseSpeedMps)
+            .apply()
     }
 }

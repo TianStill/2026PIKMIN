@@ -6,6 +6,7 @@ import com.pikmin.fakegps.service.SessionGate
 import com.pikmin.fakegps.update.*
 import com.pikmin.fakegps.utils.GeoUtils
 import com.pikmin.fakegps.data.model.DiscoveredMushroomPoint
+import com.pikmin.fakegps.data.model.DroneScanPreferences
 import com.pikmin.fakegps.data.model.LocationPoint
 import com.pikmin.fakegps.data.model.MovementMode
 import org.junit.Assert.*
@@ -212,5 +213,39 @@ class ReliabilityTest {
             val (lat, lng) = GeoUtils.applyRealisticJitter(25.0, 121.0, 0.4)
             assertTrue(GeoUtils.calculateDistanceMeters(25.0, 121.0, lat, lng) <= 0.401)
         }
+    }
+
+    @Test fun droneScanPreferencesDefaultValuesMatchStandardProfile() {
+        val defaultPref = DroneScanPreferences()
+        assertEquals("3", defaultPref.radiusMode)
+        assertEquals("8", defaultPref.customRadiusText)
+        assertTrue(defaultPref.targetTypeNames.isEmpty())
+        assertFalse(defaultPref.hasSavedTargetTypes)
+        assertEquals(DroneCruiseProfile.STANDARD.modeId, defaultPref.speedMode)
+        assertEquals(DroneCruiseProfile.STANDARD.dwellSeconds, defaultPref.dwellSeconds, 0.001f)
+        assertEquals(DroneCruiseProfile.STANDARD.stepMeters, defaultPref.stepMeters, 0.001)
+        assertEquals(5f, defaultPref.cruiseSpeedMps, 0.001f)
+    }
+
+    @Test fun droneScanPreferencesCustomValuesPreserved() {
+        val custom = DroneScanPreferences(
+            radiusMode = "custom",
+            customRadiusText = "12.5",
+            targetTypeNames = setOf(MushroomType.LARGE_ELECTRIC.name, MushroomType.LARGE_FIRE.name),
+            hasSavedTargetTypes = true,
+            speedMode = DroneCruiseProfile.SMOOTH_CRUISE.modeId,
+            dwellSeconds = 3.0f,
+            stepMeters = 220.0,
+            cruiseSpeedMps = 10f
+        )
+        assertEquals("custom", custom.radiusMode)
+        assertEquals("12.5", custom.customRadiusText)
+        assertTrue(custom.hasSavedTargetTypes)
+        assertEquals(2, custom.targetTypeNames.size)
+        assertTrue(custom.targetTypeNames.contains(MushroomType.LARGE_ELECTRIC.name))
+        assertEquals(DroneCruiseProfile.SMOOTH_CRUISE.modeId, custom.speedMode)
+        assertEquals(3.0f, custom.dwellSeconds, 0.001f)
+        assertEquals(220.0, custom.stepMeters, 0.001)
+        assertEquals(10f, custom.cruiseSpeedMps, 0.001f)
     }
 }
