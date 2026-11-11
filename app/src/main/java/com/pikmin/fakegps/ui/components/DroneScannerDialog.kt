@@ -48,7 +48,7 @@ import com.pikmin.fakegps.drone.DroneDiagnosticRecorder
 fun DroneScannerDialog(
     currentLat: Double,
     currentLng: Double,
-    onStartDroneScan: (radiusKm: Double, targetTypes: Set<MushroomType>, dwellSec: Float, stepMeters: Double) -> Unit,
+    onStartDroneScan: (radiusKm: Double, targetTypes: Set<MushroomType>, dwellSec: Float, stepMeters: Double, speedMps: Float) -> Unit,
     onResumeDroneScan: () -> Unit = {},
     onStopDroneScan: () -> Unit,
     onDismiss: () -> Unit
@@ -90,6 +90,7 @@ fun DroneScannerDialog(
     var speedMode by remember { mutableStateOf(DroneCruiseProfile.STANDARD.modeId) }
     var dwellSeconds by remember { mutableStateOf(DroneCruiseProfile.STANDARD.dwellSeconds) }
     var stepMeters by remember { mutableStateOf(DroneCruiseProfile.STANDARD.stepMeters) }
+    var cruiseSpeedMps by remember { mutableStateOf(5f) }
 
     // 相片辨識測試狀態
     var testBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -566,6 +567,9 @@ fun DroneScannerDialog(
                                                 speedMode = profile.modeId
                                                 stepMeters = profile.stepMeters
                                                 dwellSeconds = profile.dwellSeconds
+                                                if (profile.speedMps > 0f) {
+                                                    cruiseSpeedMps = profile.speedMps
+                                                }
                                             }
                                     ) {
                                         Column(
@@ -580,8 +584,13 @@ fun DroneScannerDialog(
                                                 fontSize = 13.sp
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
+                                            val displaySubtitle = if (profile.modeId == DroneCruiseProfile.SMOOTH_CRUISE.modeId) {
+                                                "${cruiseSpeedMps.toInt()}m/s (${String.format(java.util.Locale.US, "%.1f", cruiseSpeedMps * 3.6)}km/h)"
+                                            } else {
+                                                profile.subtitle
+                                            }
                                             Text(
-                                                text = profile.subtitle,
+                                                text = displaySubtitle,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f) else MaterialTheme.colorScheme.outline,
                                                 fontSize = 11.sp
@@ -593,20 +602,57 @@ fun DroneScannerDialog(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("⏱️ 每點等待時間 (微調)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text("${String.format(java.util.Locale.US, "%.1f", dwellSeconds)} 秒", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    // 🏃 巡航移動速度 (每秒公尺數) 滑桿：5-12 公尺
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("🏃 移動速度 (每秒)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                if (speedMode != DroneCruiseProfile.SMOOTH_CRUISE.modeId) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("(滑動啟用平滑速限)", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                                }
+                            }
+                            Text(
+                                "${cruiseSpeedMps.toInt()} 公尺/秒 (${String.format(java.util.Locale.US, "%.1f", cruiseSpeedMps * 3.6)} km/h)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (speedMode == DroneCruiseProfile.SMOOTH_CRUISE.modeId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Slider(
+                            value = cruiseSpeedMps,
+                            onValueChange = {
+                                cruiseSpeedMps = it
+                                speedMode = DroneCruiseProfile.SMOOTH_CRUISE.modeId
+                            },
+                            valueRange = 5f..12f,
+                            steps = 6,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
-                    Slider(
-                        value = dwellSeconds,
-                        onValueChange = { dwellSeconds = it },
-                        valueRange = 1.5f..5.0f,
-                        steps = 6
-                    )
+
+                    // ⏱️ 每點等待時間 (微調)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("⏱️ 每點等待時間 (微調)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text("${String.format(java.util.Locale.US, "%.1f", dwellSeconds)} 秒", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                        Slider(
+                            value = dwellSeconds,
+                            onValueChange = { dwellSeconds = it },
+                            valueRange = 1.5f..5.0f,
+                            steps = 6,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
                 // 5. 正北朝向提示卡片
@@ -695,7 +741,8 @@ fun DroneScannerDialog(
             } else {
                 Button(
                     onClick = {
-                        onStartDroneScan(selectedRadiusKm!!, selectedTypes, dwellSeconds, stepMeters)
+                        val effectiveSpeed = if (speedMode == DroneCruiseProfile.SMOOTH_CRUISE.modeId) cruiseSpeedMps else 0f
+                        onStartDroneScan(selectedRadiusKm!!, selectedTypes, dwellSeconds, stepMeters, effectiveSpeed)
                     },
                     enabled = radiusIsValid,
                     shape = RoundedCornerShape(12.dp)

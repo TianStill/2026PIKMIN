@@ -132,7 +132,8 @@ data class DroneScanConfig(
     val radiusKm: Double,
     val targetTypes: Set<com.pikmin.fakegps.cv.MushroomType>,
     val dwellSec: Float,
-    val stepMeters: Double
+    val stepMeters: Double,
+    val speedMps: Float = 0f
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -205,7 +206,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         else config?.let {
                             DroneScannerManager.startScan(context, viewModel.targetLocation.value.latitude,
                                 viewModel.targetLocation.value.longitude, it.radiusKm, it.targetTypes,
-                                it.dwellSec, it.stepMeters)
+                                it.dwellSec, it.stepMeters, it.speedMps)
                         }
                     }
                 } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
@@ -577,10 +578,10 @@ fun MainScreen(viewModel: MainViewModel) {
                 DroneScannerDialog(
                     currentLat = targetLocation.latitude,
                     currentLng = targetLocation.longitude,
-                    onStartDroneScan = { radiusKm, targetTypes, dwellSec, stepMeters ->
+                    onStartDroneScan = { radiusKm, targetTypes, dwellSec, stepMeters, speedMps ->
                         if (!authorizingScan && (isMocking || viewModel.startMocking())) {
                             showDroneDialog = false
-                            pendingScanParams = DroneScanConfig(radiusKm, targetTypes, dwellSec, stepMeters)
+                            pendingScanParams = DroneScanConfig(radiusKm, targetTypes, dwellSec, stepMeters, speedMps)
                             pendingResume = false
                             pendingSessionToken = MockLocationService.sessionToken
                             authorizingScan = true

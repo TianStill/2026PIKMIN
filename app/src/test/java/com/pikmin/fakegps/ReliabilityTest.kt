@@ -177,11 +177,20 @@ class ReliabilityTest {
         val point = GeoUtils.extractCoordinatesFromText("一般活動菇 免4\n52.408297,16.93426666")!!
         assertEquals(52.408297, point.latitude, 0.0000001); assertTrue(point.note.contains("免4"))
     }
-    @Test fun droneCruiseProfilesInclude18KmhMode() {
-        val profile18 = DroneCruiseProfile.getById(3)
-        assertEquals(3, profile18.modeId)
-        assertTrue(profile18.title.contains("18km/hr") || profile18.title.contains("18 km/h"))
+    @Test fun droneCruiseProfilesIncludeSmoothCruiseMode() {
+        val profile = DroneCruiseProfile.getById(3)
+        assertEquals(3, profile.modeId)
+        assertTrue(profile.title.contains("平滑") || profile.title.contains("18"))
+        assertEquals(5f, profile.speedMps, 0.001f)
         assertTrue(DroneCruiseProfile.ALL.any { it.modeId == 3 })
+    }
+
+    @Test fun cruiseSpeedRangeAcceptsFiveToTwelveMps() {
+        for (speed in 5..12) {
+            val (nextLat, nextLng) = GeoUtils.calculateNextCoordinate(25.0, 121.0, speed.toFloat(), 90f, 1.0)
+            val dist = GeoUtils.calculateDistanceMeters(25.0, 121.0, nextLat, nextLng)
+            assertEquals(speed.toDouble(), dist, 0.05)
+        }
     }
     @Test fun movementModeIncludes18Kmh() {
         assertEquals(18.0, MovementMode.SPEED_18.speedKmh, 0.001)

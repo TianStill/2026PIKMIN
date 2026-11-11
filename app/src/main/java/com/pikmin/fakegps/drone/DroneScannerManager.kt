@@ -63,16 +63,19 @@ data class DroneCruiseProfile(
     val title: String,
     val subtitle: String,
     val stepMeters: Double,
-    val dwellSeconds: Float
+    val dwellSeconds: Float,
+    val speedMps: Float = 0f
 ) {
     companion object {
-        val FAST = DroneCruiseProfile(0, "⚡ 快速巡航", "350m / 2.2s", 350.0, 2.2f)
-        val STANDARD = DroneCruiseProfile(1, "🚀 推薦標準", "300m / 2.8s", 300.0, 2.8f)
-        val PRECISE = DroneCruiseProfile(2, "🎯 精細搜尋", "240m / 3.5s", 240.0, 3.5f)
+        val FAST = DroneCruiseProfile(0, "⚡ 快速巡航", "350m / 2.2s", 350.0, 2.2f, 0f)
+        val STANDARD = DroneCruiseProfile(1, "🚀 推薦標準", "300m / 2.8s", 300.0, 2.8f, 0f)
+        val PRECISE = DroneCruiseProfile(2, "🎯 精細搜尋", "240m / 3.5s", 240.0, 3.5f, 0f)
 
-        val SPEED_18KMH = DroneCruiseProfile(3, "🚲 18km/hr", "200m / 2.5s", 200.0, 2.5f)
+        val SMOOTH_CRUISE = DroneCruiseProfile(3, "🚲 平滑巡航", "5-12m/s 可調", 200.0, 2.0f, 5f)
+        @Deprecated("Use SMOOTH_CRUISE", ReplaceWith("SMOOTH_CRUISE"))
+        val SPEED_18KMH = SMOOTH_CRUISE
 
-        val ALL = listOf(FAST, STANDARD, PRECISE, SPEED_18KMH)
+        val ALL = listOf(FAST, STANDARD, PRECISE, SMOOTH_CRUISE)
 
         fun getById(id: Int): DroneCruiseProfile = ALL.find { it.modeId == id } ?: STANDARD
     }
@@ -306,6 +309,7 @@ object DroneScannerManager {
     private var currentWaypoints: List<LocationPoint> = emptyList()
     private var currentTargetTypes: Set<MushroomType> = emptySet()
     private var currentDwellSeconds: Float = 2.8f
+    private var currentSpeedMps: Float = 0f
     private var currentStartIndex: Int = 0
 
     /**
@@ -318,7 +322,8 @@ object DroneScannerManager {
         radiusKm: Double,
         targetTypes: Set<MushroomType>,
         dwellSeconds: Float = 2.8f,
-        stepMeters: Double = 300.0
+        stepMeters: Double = 300.0,
+        speedMps: Float = 0f
     ) {
         val isPureCruise = targetTypes.isEmpty()
 
@@ -332,15 +337,18 @@ object DroneScannerManager {
         currentWaypoints = waypoints
         currentTargetTypes = targetTypes
         currentDwellSeconds = dwellSeconds
+        currentSpeedMps = speedMps
         currentStartIndex = 0
 
+        val speedDesc = if (speedMps in 5f..12f) "（${speedMps.toInt()}m/s 巡航）" else ""
         Toast.makeText(
             context,
-            if (isPureCruise) "🛸 無人機出發（純巡航模式）！請確認遊戲地圖已點擊「指南針」回正正北！" else "🛸 無人機出發！請確認遊戲地圖已點擊「指南針」回正正北！",
+            if (isPureCruise) "🛸 無人機純巡航出發${speedDesc}！請確認遊戲地圖已點擊「指南針」回正正北！"
+            else "🛸 無人機出發${speedDesc}！請確認遊戲地圖已點擊「指南針」回正正北！",
             Toast.LENGTH_SHORT
         ).show()
 
-        startScanInternal(context, waypoints, 0, targetTypes, dwellSeconds)
+        startScanInternal(context, waypoints, 0, targetTypes, dwellSeconds, speedMps)
     }
 
     /**
@@ -363,7 +371,8 @@ object DroneScannerManager {
             waypoints = currentWaypoints,
             startIndex = currentStartIndex,
             targetTypes = currentTargetTypes,
-            dwellSeconds = currentDwellSeconds
+            dwellSeconds = currentDwellSeconds,
+            speedMps = currentSpeedMps
         )
     }
 
@@ -390,7 +399,8 @@ object DroneScannerManager {
         waypoints: List<LocationPoint>,
         startIndex: Int,
         targetTypes: Set<MushroomType>,
-        dwellSeconds: Float
+        dwellSeconds: Float,
+        speedMps: Float = 0f
     ) {
         if (scanJob?.isActive == true) return
         if (mediaProjection == null || virtualDisplay == null || !MockLocationService.isRunning.value) {
@@ -444,11 +454,49 @@ object DroneScannerManager {
                     }
                 }
                 }
+                var lastLocation: LocationPoint? = if (startIndex > 0 && startIndex < waypoints.size) waypoints[startIndex - 1] else waypoints.firstOrNull()
                 for (index in startIndex until waypoints.size) {
                     ensureActive()
                     currentStartIndex = index // On interruption, retry the unanalysed waypoint.
                     val waypoint = waypoints[index]
+
+                    // 🌟 若設定每秒 5~12 公尺平滑巡航速度，在航點之間以固定速度平滑推進
+                    if (speedMps in 5f..12f && lastLocation != null) {
+                        val totalDistance = GeoUtils.calculateDistanceMeters(
+                            lastLocation.latitude, lastLocation.longitude,
+                            waypoint.latitude, waypoint.longitude
+                        )
+                        if (totalDistance > speedMps) {
+                            val bearing = GeoUtils.calculateBearing(
+                                lastLocation.latitude, lastLocation.longitude,
+                                waypoint.latitude, waypoint.longitude
+                            )
+                            var currentLat = lastLocation.latitude
+                            var currentLng = lastLocation.longitude
+                            var walkedDistance = 0.0
+
+                            while (walkedDistance + speedMps < totalDistance && isActive) {
+                                ensureActive()
+                                val (nextLat, nextLng) = GeoUtils.calculateNextCoordinate(
+                                    currentLat, currentLng, speedMps, bearing, 1.0
+                                )
+                                val intermediate = LocationPoint(nextLat, nextLng)
+                                check(MockLocationService.updateLocation(appContext, intermediate)) { "定位已停止" }
+                                _status.value = _status.value.copy(
+                                    currentCoordinate = intermediate,
+                                    statusMessage = if (targetTypes.isEmpty()) "正在純巡航前往第 ${index + 1}/${waypoints.size} 點 (${speedMps.toInt()}m/s)"
+                                                    else "正在巡航前往航點 ${index + 1}/${waypoints.size} (${speedMps.toInt()}m/s)"
+                                )
+                                currentLat = nextLat
+                                currentLng = nextLng
+                                walkedDistance += speedMps
+                                delay(1000L)
+                            }
+                        }
+                    }
+
                     check(MockLocationService.updateLocation(appContext, waypoint)) { "定位已停止" }
+                    lastLocation = waypoint
                     _status.value = _status.value.copy(phase = ScanPhase.SCANNING, currentIndex = index + 1,
                         currentCoordinate = waypoint, statusMessage = if (targetTypes.isEmpty()) "正在純巡航航點 ${index + 1}/${waypoints.size}" else "正在分析航點 ${index + 1}/${waypoints.size}")
                     if (targetTypes.isEmpty()) {
