@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="centerGlow2" cx="50%" cy="45%" r="65%">
+      <stop offset="0%" stop-color="#1E3A8A" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="neonCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="50%" stop-color="#00F0FF" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="goldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047" />
+      <stop offset="100%" stop-color="#EAB308" />
+    </linearGradient>
+    <filter id="superGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- 圓角外框底座 -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#centerGlow2)" />
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="none" stroke="#0EA5E9" stroke-width="3" stroke-opacity="0.4" />
+
+  <!-- 科技光暈背景層 -->
+  <circle cx="256" cy="220" r="140" fill="#0284C7" fill-opacity="0.08" />
+
+  <!-- 漢字「天」的上第一橫筆 (俐落現代白) -->
+  <path d="M175 140 L337 140" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" filter="url(#superGlow)" />
+
+  <!-- 漢字「天」的第二長橫筆 (展現氣勢) -->
+  <path d="M120 215 L392 215" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" filter="url(#superGlow)" />
+
+  <!-- 巧妙融入的「J (JIMMY)」撇筆：從天字正中穿透第二橫筆，向左下方形成完美的「J」弧勾 -->
+  <path d="M256 125 L256 260 C256 345 205 385 140 375 C105 370 85 345 80 315" 
+        fill="none" stroke="url(#neonCyan)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" filter="url(#superGlow)" />
+
+  <!-- 漢字「天」的捺筆 (朝右下疾馳的流線光翼) -->
+  <path d="M250 225 C295 285 345 345 425 375" 
+        fill="none" stroke="url(#neonCyan)" stroke-width="28" stroke-linecap="round" filter="url(#superGlow)" />
+
+  <!-- 金色能量核心焦點 (GPS定位原點) -->
+  <circle cx="256" cy="215" r="10" fill="url(#goldGradient)" />
+
+  <!-- 底部雙單字標記 -->
+  <g transform="translate(256, 450)">
+    <rect x="-120" y="-20" width="240" height="32" rx="16" fill="#0F172A" stroke="#38BDF8" stroke-width="1.5" stroke-opacity="0.6"/>
+    <text x="0" y="2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" 
+          font-size="16" font-weight="900" fill="#FFFFFF" letter-spacing="5" text-anchor="middle">JIMMY · TIAN</text>
+  </g>
+</svg>

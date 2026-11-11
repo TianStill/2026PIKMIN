@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JIMMY & TIAN App 圖示設計提案展示</title>
+  <style>
+    :root {
+      --bg: #090D16;
+      --card-bg: #111827;
+      --card-border: #1F2937;
+      --accent-cyan: #0EA5E9;
+      --accent-glow: #38BDF8;
+      --accent-gold: #F59E0B;
+      --accent-green: #10B981;
+      --text-main: #F3F4F6;
+      --text-muted: #9CA3AF;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      padding: 40px 24px;
+      line-height: 1.6;
+    }
+    .header {
+      max-width: 1200px;
+      margin: 0 auto 36px auto;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      background: rgba(14, 165, 233, 0.15);
+      border: 1px solid rgba(14, 165, 233, 0.4);
+      color: var(--accent-glow);
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+    .badge-updated {
+      display: inline-block;
+      padding: 4px 10px;
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.5);
+      color: #34D399;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      margin-left: 8px;
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #FFFFFF 30%, #38BDF8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 12px;
+    }
+    p.subtitle {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .notice {
+      max-width: 1200px;
+      margin: 0 auto 28px auto;
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 12px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #FDE68A;
+      font-size: 14px;
+    }
+    .feedback-banner {
+      max-width: 1200px;
+      margin: 0 auto 36px auto;
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #A7F3D0;
+      font-size: 14px;
+    }
+    .grid {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 28px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(56, 189, 248, 0.5);
+      box-shadow: 0 12px 30px -10px rgba(14, 165, 233, 0.3);
+    }
+    .card.highlight {
+      border: 2px solid rgba(56, 189, 248, 0.7);
+      box-shadow: 0 0 25px rgba(14, 165, 233, 0.25);
+    }
+    .preview-box {
+      background: radial-gradient(circle at center, #1E293B 0%, #0F172A 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 36px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .preview-box img, .preview-box svg {
+      width: 220px;
+      height: 220px;
+      border-radius: 46px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+      object-fit: cover;
+    }
+    .content {
+      padding: 24px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .concept-tag {
+      font-size: 12px;
+      color: var(--accent-glow);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+    }
+    .desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+    .features {
+      list-style: none;
+      margin-top: auto;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 14px;
+      font-size: 13px;
+    }
+    .features li {
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #E2E8F0;
+    }
+    .features li::before {
+      content: "✦";
+      color: var(--accent-glow);
+    }
+    .section-title {
+      max-width: 1200px;
+      margin: 40px auto 20px auto;
+      font-size: 22px;
+      font-weight: 700;
+      color: #E2E8F0;
+      border-left: 4px solid var(--accent-cyan);
+      padding-left: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="badge">Concept Preview • 僅供展示評估</div>
+    <h1>JIMMY &amp; TIAN 雙品牌圖示設計提案</h1>
+    <p class="subtitle">將「JIMMY (J)」與「TIAN (天 / T)」深度融合，搭配 Pikmin 蘑菇雷達巡航意象的專屬 App 圖標設計</p>
+  </div>
+
+  <div class="notice">
+    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+    <span><strong>展示模式提醒</strong>：依據您的指示，此提案僅進行概念設計與視覺展示，<strong>未對專案程式碼與正式圖示進行任何修改或更新</strong>。</span>
+  </div>
+
+  <div class="feedback-banner">
+    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+    <span><strong>最新調整完成</strong>：已針對您的反饋「方案 1 右側字體太像 J，修改為 T 的樣子」，重新渲染出清晰明確的「T」字造型方案！</span>
+  </div>
+
+  <!-- 最新修正版展示 -->
+  <div class="section-title">
+    ✨ 最新修正焦點：方案 1「拉絲鈦合金 Monogram 款」明確 T 字版
+  </div>
+
+  <div class="grid">
+    <!-- Revised Variant A -->
+    <div class="card highlight">
+      <div class="preview-box">
+        <img src="preview_concept1_revised_t_variant_a.jpg" alt="Revised Variant A">
+      </div>
+      <div class="content">
+        <div class="concept-tag">REVISED OPTION 1A · 強化辨識推薦 ⭐</div>
+        <h2>立體鈦合金雙字母 JT 旗艦款 <span class="badge-updated">NEW 修正版 A</span></h2>
+        <p class="desc">維持最受歡迎的高奢拉絲鈦合金質感。左側為圓潤俐落的「J」，右側改為<strong>極具識別度的標準正體「T」</strong>（平直剛硬頂槓 + 正中垂直立柱，絕無弧勾），中央帶有同心圓雷達掃描與導航十字絲。</p>
+        <ul class="features">
+          <li><strong>左 J 右 T 絕對分明</strong>：徹底消除雙 J 疑慮，辨識度滿分</li>
+          <li>碳纖維幾何底座 + 360 度青藍霓虹雷達環</li>
+          <li>拉絲金屬反光與倒角立體感極致細膩</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Revised Variant B -->
+    <div class="card highlight">
+      <div class="preview-box">
+        <img src="preview_concept1_revised_t_variant_b.jpg" alt="Revised Variant B">
+      </div>
+      <div class="content">
+        <div class="concept-tag">REVISED OPTION 1B · 直柱修直款</div>
+        <h2>直柱修正版鈦合金雷達款 <span class="badge-updated">NEW 修正版 B</span></h2>
+        <p class="desc">保留原方案 1 的斜切與排版構圖，將右側原本帶有弧勾的下半部<strong>完全拉直為垂直立柱</strong>，呈現「J」與「T」緊湊交錯的緊湊科技感。</p>
+        <ul class="features">
+          <li>右側底部完全拉直，強化 T 的垂直感</li>
+          <li>保持緊密互鎖的緊湊構圖</li>
+          <li>動態雷達掃描光芒與暗夜藍調</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Original Variant 1 for comparison -->
+    <div class="card">
+      <div class="preview-box">
+        <img src="preview_concept1_radar_fusion.jpg" alt="Original Concept 1">
+      </div>
+      <div class="content">
+        <div class="concept-tag">ORIGINAL · 修改前原版</div>
+        <h2>修改前原版 (參考對比)</h2>
+        <p class="desc">先前生成的原版，右側筆劃尾部帶有向內勾起的弧度，容易被誤認為字母「J」。供您快速與上方兩款最新修正版進行視覺對照。</p>
+        <ul class="features">
+          <li>右側帶有尾勾（已於 1A、1B 修正）</li>
+          <li>可對比修正後的文字清晰度提升程度</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 其他概念展示 -->
+  <div class="section-title">系列一：其他 3D 科技旗艦效果圖 (Other 3D Concepts)</div>
+
+  <div class="grid">
+    <!-- Concept 2 -->
+    <div class="card">
+      <div class="preview-box">
+        <img src="preview_concept2_drone_hud.jpg" alt="Drone HUD Icon">
+      </div>
+      <div class="content">
+        <div class="concept-tag">OPTION 02 · 飛行 HUD 款</div>
+        <h2>賽博戰術無人機 HUD 融合款</h2>
+        <p class="desc">將 J 與 T 融合為一架向上躍升的無人機機首與瞄準十字絲，周圍環繞雷達座標與 HUD 方位角標尺，直觀呼應無人機尋菇雷達。</p>
+        <ul class="features">
+          <li>J 與 T 轉化為空氣動力戰術無人機標記</li>
+          <li>動態發光 Neon Cyan HUD 儀表光環</li>
+          <li>高對比度，在手機主螢幕上非常搶眼</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Concept 3 -->
+    <div class="card">
+      <div class="preview-box">
+        <img src="preview_concept3_titanium_monogram.jpg" alt="Geometric Duo Icon">
+      </div>
+      <div class="content">
+        <div class="concept-tag">OPTION 03 · 幾何雕刻款</div>
+        <h2>微縮十字絲立體 Monogram 款</h2>
+        <p class="desc">以高精度倒角金屬切面，將「J」的曲線巧妙作為「T」的底座支柱，中央點綴 GPS 雷達定位亮點，工整對稱且大氣沉穩。</p>
+        <ul class="features">
+          <li>珠寶級高精度立體倒角切面</li>
+          <li>中心 GPS 金核瞄準焦點</li>
+          <li>耐看穩重，適合現代系統 UI 風格</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Concept 4 -->
+    <div class="card">
+      <div class="preview-box">
+        <img src="preview_concept4_minimal_ribbon.jpg" alt="Minimal Ribbon Icon">
+      </div>
+      <div class="content">
+        <div class="concept-tag">OPTION 04 · 極簡光帶款</div>
+        <h2>流線飛行航跡絲帶款</h2>
+        <p class="desc">以一體成形的發光流動絲帶筆觸，一氣呵成勾勒出 T 的水平翼與 J 的轉折鉤弧，猶如巡航無人機劃破夜空的航行軌跡。</p>
+        <ul class="features">
+          <li>一筆連貫的發光導光條設計</li>
+          <li>純淨深邃星空藍底座</li>
+          <li>簡約俐落，辨識度極高</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">系列二：原生 Android 向量向量設計系列 (Vector Art &amp; 原版傳承)</div>
+
+  <div class="grid">
+    <!-- SVG 1 -->
+    <div class="card">
+      <div class="preview-box">
+        <img src="concept2_tian_fusion_j.svg" alt="Tian Fusion J">
+      </div>
+      <div class="content">
+        <div class="concept-tag">OPTION 05 · 原版傳承推薦 ⭐</div>
+        <h2>「天 (TIAN)」字撇筆融 J 款</h2>
+        <p class="desc">完美保留目前 App 圖標中氣勢磅礴的漢字「天」，巧思將其左側撇筆改為優雅有力的英文「J (JIMMY)」，中央以金色 GPS 原點貫穿，底部標註「JIMMY · TIAN」。</p>
+        <ul class="features">
+          <li>100% 傳承既有「天」字識別度，無縫銜接</li>
+          <li>巧妙結合 JIMMY (J) 與 TIAN (天)</li>
+          <li>可直接轉為 Android VectorDrawable (XML)</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SVG 2 -->
+    <div class="card">
+      <div class="preview-box">
+        <img src="concept1_monogram_jt.svg" alt="Monogram JT">
+      </div>
+      <div class="content">
+        <div class="concept-tag">OPTION 06 · 幾何互鎖款</div>
+        <h2>幾何互鎖 Monogram 航標款</h2>
+        <p class="desc">以銀白與青藍兩道高光色帶，將 T 的上橫樑與 J 的勾筆共用中軸互鎖，右翼延伸為導航下行翼，背景搭配細膩的雷達同心環與十字刻度。</p>
+        <ul class="features">
+          <li>清晰的 J 與 T 雙字母識別</li>
+          <li>細緻的雷達儀器十字刻度裝飾</li>
+          <li>底部 JIMMY · TIAN 精緻字標</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SVG 3 -->
+    <div class="card">
+      <div class="preview-box">
+        <img src="concept3_radar_badge_jt.svg" alt="Radar Badge JT">
+      </div>
+      <div class="content">
+        <div class="concept-tag">OPTION 07 · 戰術徽章款</div>
+        <h2>幾何六角雷達戰術徽章款</h2>
+        <p class="desc">以科技蜂巢六角形為核心盾牌，內部嵌刻銳利斜切的 J 與 T，並在四個方位帶有無人機旋翼航向點，展現硬核軍規戰術感。</p>
+        <ul class="features">
+          <li>陽剛硬朗的六角蜂巢盾牌輪廓</li>
+          <li>幾何斜切刀鋒字母造型</li>
+          <li>軍規無人機與雷達風格強烈</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

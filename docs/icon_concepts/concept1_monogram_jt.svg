@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B0F19" />
+      <stop offset="50%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E293B" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F0FF" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+    <linearGradient id="whiteSilver" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#94A3B8" />
+    </linearGradient>
+    <filter id="glow1" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- 圓角外框底座 (Squircle) -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bgGrad1)" />
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="none" stroke="#38BDF8" stroke-width="3.5" stroke-opacity="0.3" />
+
+  <!-- 背景科技雷達同心裝飾圓環 -->
+  <circle cx="256" cy="230" r="170" fill="none" stroke="#38BDF8" stroke-width="1.5" stroke-dasharray="8 8" stroke-opacity="0.25" />
+  <circle cx="256" cy="230" r="115" fill="none" stroke="#38BDF8" stroke-width="1" stroke-opacity="0.2" />
+
+  <!-- 雷達十字刻度線 -->
+  <line x1="256" y1="45" x2="256" y2="70" stroke="#38BDF8" stroke-width="3" stroke-opacity="0.6" stroke-linecap="round" />
+  <line x1="256" y1="390" x2="256" y2="415" stroke="#38BDF8" stroke-width="3" stroke-opacity="0.6" stroke-linecap="round" />
+  <line x1="70" y1="230" x2="95" y2="230" stroke="#38BDF8" stroke-width="3" stroke-opacity="0.6" stroke-linecap="round" />
+  <line x1="417" y1="230" x2="442" y2="230" stroke="#38BDF8" stroke-width="3" stroke-opacity="0.6" stroke-linecap="round" />
+
+  <!-- 主體符號：T 與 J 互鎖交織 -->
+  <!-- T 的強勁水平橫樑 -->
+  <path d="M140 150 L372 150" stroke="url(#whiteSilver)" stroke-width="26" stroke-linecap="round" filter="url(#glow1)" />
+  
+  <!-- J 與 T 共享中軸並優雅向左下反折勾起 -->
+  <path d="M256 150 L256 270 C256 340 210 360 160 350 C130 345 110 325 105 295" 
+        fill="none" stroke="url(#glowGrad)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow1)" />
+
+  <!-- T 的右側下行斜導航翼 (航跡象徵) -->
+  <path d="M256 210 L350 310 A20 20 0 0 1 350 340 L340 350" 
+        fill="none" stroke="url(#cyanGrad)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="340" cy="350" r="8" fill="#00F0FF" />
+
+  <!-- 底部精緻品牌小字 -->
+  <text x="256" y="445" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" 
+        font-size="24" font-weight="800" fill="#E2E8F0" letter-spacing="8" text-anchor="middle">JIMMY · TIAN</text>
+  <text x="256" y="468" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" 
+        font-size="12" font-weight="600" fill="#38BDF8" letter-spacing="4" text-anchor="middle" opacity="0.8">PRO RADAR SYSTEM</text>
+</svg>
