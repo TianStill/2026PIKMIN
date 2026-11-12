@@ -59,7 +59,7 @@ class TransparentClipboardActivity : Activity() {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val clip = clipboard?.primaryClip
             val clipText = if (clip != null && clip.itemCount > 0) {
-                clip.getItemAt(0)?.text?.toString() ?: ""
+                clip.getItemAt(0)?.coerceToText(this)?.toString() ?: ""
             } else {
                 ""
             }
