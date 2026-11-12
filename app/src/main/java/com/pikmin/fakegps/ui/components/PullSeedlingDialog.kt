@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pikmin.fakegps.data.repository.PreferencesRepo
+import com.pikmin.fakegps.service.PullSeedlingOverlayService
 import com.pikmin.fakegps.utils.GeoUtils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -56,6 +57,7 @@ fun PullSeedlingDialog(
 ) {
     val context = LocalContext.current
     val prefs = remember { PreferencesRepo(context) }
+    val isOverlayRunning by PullSeedlingOverlayService.isRunning.collectAsState()
 
     // 當前步驟：1..4
     var currentStep by remember { mutableIntStateOf(1) }
@@ -161,6 +163,51 @@ fun PullSeedlingDialog(
                 }
 
                 HorizontalDivider()
+
+                // 🎈 遊戲懸浮迷你控制器快捷切換
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isOverlayRunning) Color(0xFF10B981).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = if (isOverlayRunning) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981)) else null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(text = "🎈", fontSize = 18.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = if (isOverlayRunning) "遊戲懸浮控制器：運行中" else "遊戲上方懸浮迷你控制器",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isOverlayRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "在遊戲畫面上層 1 秒完成各項拉盆動作",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isOverlayRunning,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    PullSeedlingOverlayService.start(context)
+                                } else {
+                                    PullSeedlingOverlayService.stop(context)
+                                }
+                            }
+                        )
+                    }
+                }
 
                 // 各步驟主要內容
                 when (currentStep) {

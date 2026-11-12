@@ -22,6 +22,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 應用程式內直接安裝更新權限 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 懸浮拉盆控制器權限 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- 宣告查詢 Pikmin Bloom 遊戲 Package Visibility (Android 11+) -->
     <queries>
@@ -58,6 +60,12 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location|mediaProjection" />
+
+        <!-- 懸浮拉盆控制器服務 -->
+        <service
+            android:name=".service.PullSeedlingOverlayService"
+            android:enabled="true"
+            android:exported="false" />
 
         <!-- 應用程式內更新安裝 FileProvider -->
         <provider
