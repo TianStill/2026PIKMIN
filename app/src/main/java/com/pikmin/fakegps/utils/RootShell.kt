@@ -11,7 +11,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -19,34 +19,59 @@ import java.util.concurrent.TimeUnit
  *
  * 專為拉盆極速流程提供底層能力：
  * 1. 一鍵開關手機 GPS 定位 (無需跳轉設定頁面)
- * 2. 一鍵強制關閉遊戲 (相當於手動滑掉 Pikmin Bloom)
- * 3. 偵測遊戲是否正在執行
+ * 2. 一鍵強制關閉遊戲 (Root 秒關，無 Root 快速引導強停)
+ * 3. 設備 Root 狀態與權限偵測 (支援 Magisk / KernelSU / APatch / SuperSU)
  */
 object RootShell {
 
     private const val TAG = "RootShell"
-    private var isRootCached: Boolean? = null
+
+    // 僅快取成功狀態 (true)，失敗時絕不快取 false，確保使用者在彈出授權視窗允許後能即時生效
+    @Volatile
+    private var isRootConfirmed: Boolean = false
 
     data class CommandResult(val exitCode: Int, val stdout: String, val stderr: String) {
         val isSuccess: Boolean get() = exitCode == 0
     }
 
     /**
-     * 檢測設備是否具備 Root 權限
+     * 檢測設備是否存在 su 執行檔或已確認 Root
      */
-    fun isRootAvailable(): Boolean {
-        isRootCached?.let { return it }
-        val result = executeSync("id", asRoot = true, timeoutSeconds = 2)
-        val available = result.isSuccess && result.stdout.contains("uid=0")
-        isRootCached = available
-        Log.d(TAG, "Root availability check: $available")
-        return available
+    fun hasSuBinary(): Boolean {
+        if (isRootConfirmed) return true
+        val paths = arrayOf(
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/system/sd/xbin/su",
+            "/system/bin/failsafe/su",
+            "/data/local/xbin/su",
+            "/data/local/bin/su",
+            "/data/local/su",
+            "/data/adb/ksu/bin/su",
+            "/data/adb/ap/bin/su"
+        )
+        return paths.any { File(it).exists() }
     }
 
     /**
-     * 執行 Shell 指令 (同步，具備超時機制避免阻塞)
+     * 檢測並驗證設備是否具備可用之 Root 權限
      */
-    fun executeSync(command: String, asRoot: Boolean = true, timeoutSeconds: Long = 3): CommandResult {
+    fun isRootAvailable(): Boolean {
+        if (isRootConfirmed) return true
+        val result = executeSync("id", asRoot = true, timeoutSeconds = 5)
+        if (result.isSuccess && result.stdout.contains("uid=0")) {
+            isRootConfirmed = true
+            Log.d(TAG, "Root permission confirmed and active")
+            return true
+        }
+        return false
+    }
+
+    /**
+     * 執行 Shell 指令 (同步，提供充足超時時間避免 Magisk 彈窗被強制中斷)
+     */
+    fun executeSync(command: String, asRoot: Boolean = true, timeoutSeconds: Long = 6): CommandResult {
         return try {
             val process = if (asRoot) {
                 ProcessBuilder("su", "-c", command).start()
@@ -68,9 +93,15 @@ object RootShell {
 
             val stdout = process.inputStream.bufferedReader().use(BufferedReader::readText).trim()
             val stderr = process.errorStream.bufferedReader().use(BufferedReader::readText).trim()
-            CommandResult(process.exitValue(), stdout, stderr)
+            val code = process.exitValue()
+
+            if (asRoot && code == 0) {
+                isRootConfirmed = true
+            }
+
+            CommandResult(code, stdout, stderr)
         } catch (e: Exception) {
-            Log.w(TAG, "Execution failed: ${e.message}")
+            Log.w(TAG, "Execution failed ($command): ${e.message}")
             CommandResult(-1, "", e.message ?: "Execution failed")
         }
     }
@@ -101,29 +132,28 @@ object RootShell {
     }
 
     /**
-     * 直接開關手機 GPS 定位 (優先使用 Root / Secure Settings，失敗時才需跳轉設定頁)
+     * 直接開關手機 GPS 定位 (優先使用 Root / Secure Settings，失敗時由呼叫端安全跳轉)
      *
-     * @return true 代表已直接在背景成功切換；false 代表無權限需引導至設定頁
+     * @return true 代表已直接在背景成功切換；false 代表無權限需跳轉設定頁
      */
     fun setGpsEnabled(context: Context, enable: Boolean): Boolean {
-        // 1. 嘗試使用 Root 權限直接修改系統定位開關 (最乾淨快速，完全不跳頁)
-        if (isRootAvailable()) {
-            val cmd1 = if (enable) "cmd location set-location-enabled true" else "cmd location set-location-enabled false"
-            val cmd2 = if (enable) "settings put secure location_mode 3" else "settings put secure location_mode 0"
-            executeSync("$cmd1; $cmd2", asRoot = true, timeoutSeconds = 2)
-            // 等待短暫狀態變更確認
-            Thread.sleep(100)
+        // 1. 嘗試透過 Root 指令直接切換系統 GPS
+        val cmd1 = if (enable) "cmd location set-location-enabled true" else "cmd location set-location-enabled false"
+        val cmd2 = if (enable) "settings put secure location_mode 3" else "settings put secure location_mode 0"
+        val rootResult = executeSync("$cmd1; $cmd2", asRoot = true, timeoutSeconds = 4)
+        if (rootResult.isSuccess) {
+            Thread.sleep(120)
             if (isGpsEnabled(context) == enable) {
                 return true
             }
         }
 
-        // 2. 嘗試使用 WRITE_SECURE_SETTINGS 權限 (ADB 授權過的使用者)
+        // 2. 嘗試使用 WRITE_SECURE_SETTINGS 權限
         try {
             val mode = if (enable) Settings.Secure.LOCATION_MODE_HIGH_ACCURACY else Settings.Secure.LOCATION_MODE_OFF
             val success = Settings.Secure.putInt(context.contentResolver, Settings.Secure.LOCATION_MODE, mode)
             if (success) {
-                Thread.sleep(100)
+                Thread.sleep(120)
                 if (isGpsEnabled(context) == enable) {
                     return true
                 }
@@ -139,42 +169,21 @@ object RootShell {
      * @return true 代表已透過 Root 成功強制終止；false 代表無 Root 權限
      */
     fun forceStopPackage(context: Context, packageName: String): Boolean {
-        if (isRootAvailable()) {
-            val result = executeSync("am force-stop $packageName", asRoot = true)
-            if (result.isSuccess) {
-                return true
-            }
+        // 1. 直接嘗試以 Root 強制終止所有相關進程
+        val killCommand = "am force-stop $packageName; pkill -9 -f $packageName"
+        val result = executeSync(killCommand, asRoot = true, timeoutSeconds = 4)
+        if (result.isSuccess) {
+            Log.d(TAG, "Force stop $packageName succeeded via Root")
+            return true
         }
 
-        // 若無 Root，嘗試調用系統 killBackgroundProcesses
+        // 2. 無 Root 時調用系統 killBackgroundProcesses
         try {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             am?.killBackgroundProcesses(packageName)
         } catch (_: Exception) {}
 
         return false
-    }
-
-    /**
-     * 檢測指定應用程式當前是否正在執行
-     */
-    fun isPackageRunning(context: Context, packageName: String): Boolean {
-        // 1. 優先使用 Root 查詢 pid
-        if (isRootAvailable()) {
-            val result = executeSync("pidof $packageName", asRoot = true, timeoutSeconds = 1)
-            if (result.isSuccess && result.stdout.isNotBlank()) {
-                return true
-            }
-        }
-
-        // 2. 透過 ActivityManager 查詢
-        return try {
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            val processes = am?.runningAppProcesses ?: emptyList()
-            processes.any { it.processName == packageName }
-        } catch (_: Exception) {
-            false
-        }
     }
 
     /**

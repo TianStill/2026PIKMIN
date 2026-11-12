@@ -59,6 +59,17 @@
             </intent-filter>
         </activity>
 
+        <!-- 懸浮控制器秒速透明剪貼簿讀取跳板 (解決 Android 10+ 背景服務禁止讀取剪貼簿限制) -->
+        <activity
+            android:name=".ui.TransparentClipboardActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:finishOnTaskLaunch="true"
+            android:launchMode="singleInstance"
+            android:noHistory="true"
+            android:configChanges="orientation|screenSize"
+            android:exported="false" />
+
         <!-- 模擬定位前台服務 -->
         <service
             android:name=".service.MockLocationService"

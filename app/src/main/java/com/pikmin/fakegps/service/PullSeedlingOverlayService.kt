@@ -3,7 +3,6 @@ package com.pikmin.fakegps.service
 import android.annotation.SuppressLint
 import android.app.Service
 import android.content.BroadcastReceiver
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -20,26 +19,25 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
-import com.pikmin.fakegps.data.model.LocationPoint
 import com.pikmin.fakegps.data.repository.PreferencesRepo
-import com.pikmin.fakegps.utils.GeoUtils
+import com.pikmin.fakegps.ui.TransparentClipboardActivity
 import com.pikmin.fakegps.utils.PermissionHelper
 import com.pikmin.fakegps.utils.RootShell
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.Locale
 import kotlin.math.abs
 
 /**
  * 🍄 金盆拉盆懸浮控制器服務 (PullSeedlingOverlayService)
  *
  * 浮在所有 App（包括遊戲與桌面）最上層的極簡操作膠囊：
- * 1. [📍 飛目標]：自動監聽剪貼簿！一複製座標立即自動填入，一鍵直接飛去
+ * 1. [📍 飛目標]：透過秒速透明跳板 100% 讀取系統最新剪貼簿座標，一鍵直接飛去
  * 2. [🛑 停飛]：一鍵停止虛擬定位
- * 3. [🟢 關GPS / ⚪ 開GPS]：直接控制開關手機定位，無需跳轉設定頁面
- * 4. [🛑 關遊戲 / 🎮 開遊戲]：一鍵強制關閉（免手動滑掉）或重新啟動 Pikmin Bloom
- * 5. [🌱] 點擊隨時縮小為小綠苗徽章，按住可任意拖曳移動
+ * 3. [🟢 關GPS / ⚪ 開GPS]：直接控制開關手機系統定位，免跳轉設定頁
+ * 4. [🛑 關遊戲]：一鍵強制終止 Pikmin Bloom（免去手動多工滑掉程式）
+ * 5. [🎮 開遊戲]：一鍵快速啟動 Pikmin Bloom
+ * 6. [🌱] 點擊隨時縮小為小綠苗徽章，按住可任意拖曳移動
  */
 class PullSeedlingOverlayService : Service() {
 
@@ -73,14 +71,10 @@ class PullSeedlingOverlayService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
     // 系統監聽器
-    private var clipboardManager: ClipboardManager? = null
-    private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
     private var gpsReceiver: BroadcastReceiver? = null
 
     // UI 控制項引用
-    private var btnFlyRef: TextView? = null
     private var btnGpsRef: TextView? = null
-    private var btnGameRef: TextView? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -97,8 +91,6 @@ class PullSeedlingOverlayService : Service() {
         _isRunning.value = false
         serviceScope.cancel()
 
-        // 登出監聽器
-        clipListener?.let { clipboardManager?.removePrimaryClipChangedListener(it) }
         gpsReceiver?.let {
             try {
                 unregisterReceiver(it)
@@ -143,11 +135,11 @@ class PullSeedlingOverlayService : Service() {
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(6), dpToPx(5), dpToPx(6), dpToPx(5))
+            setPadding(dpToPx(5), dpToPx(4), dpToPx(5), dpToPx(4))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dpToPx(24).toFloat()
-                setColor(Color.parseColor("#EE0F172A")) // 深色半透明科技藍黑
+                setColor(Color.parseColor("#F00F172A")) // 深色高透科技藍黑
                 setStroke(dpToPx(1), Color.parseColor("#10B981")) // 翡翠綠邊框
             }
         }
@@ -162,12 +154,12 @@ class PullSeedlingOverlayService : Service() {
         // 拖曳把手兼折疊切換徽章 (🌱)
         val badge = TextView(this).apply {
             text = "🌱"
-            textSize = 17f
+            textSize = 16f
             gravity = Gravity.CENTER
-            setPadding(dpToPx(8), dpToPx(5), dpToPx(8), dpToPx(5))
+            setPadding(dpToPx(7), dpToPx(5), dpToPx(7), dpToPx(5))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(18).toFloat()
+                cornerRadius = dpToPx(16).toFloat()
                 setColor(Color.parseColor("#2610B981"))
             }
         }
@@ -210,7 +202,7 @@ class PullSeedlingOverlayService : Service() {
                         actionsContainer.visibility = if (isExpanded) View.VISIBLE else View.GONE
                         badge.text = if (isExpanded) "🌱" else "🌱 拉盆"
                         if (isExpanded) {
-                            refreshAllButtonStates()
+                            updateGpsButtonUI()
                         }
                     } else {
                         prefs.overlayX = params.x
@@ -226,31 +218,30 @@ class PullSeedlingOverlayService : Service() {
         fun createActionButton(title: String, textColorHex: String, bgHex: String, onClick: () -> Unit): TextView {
             return TextView(this).apply {
                 text = title
-                textSize = 11.5f
+                textSize = 11f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.parseColor(textColorHex))
                 gravity = Gravity.CENTER
-                setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6))
+                setPadding(dpToPx(7), dpToPx(5), dpToPx(7), dpToPx(5))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    setMargins(dpToPx(3), 0, dpToPx(3), 0)
+                    setMargins(dpToPx(2), 0, dpToPx(2), 0)
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dpToPx(12).toFloat()
+                    cornerRadius = dpToPx(10).toFloat()
                     setColor(Color.parseColor(bgHex))
                 }
                 setOnClickListener { onClick() }
             }
         }
 
-        // 按鈕 1：[📍 飛目標] (自動讀取最新剪貼簿或記憶座標)
+        // 按鈕 1：[📍 飛目標] (透過秒速透明跳板 100% 讀取系統最新剪貼簿並傳送)
         val btnFly = createActionButton("📍 飛目標", "#10B981", "#2210B981") {
             performFlyToTarget()
         }
-        btnFlyRef = btnFly
 
         // 按鈕 2：[🛑 停飛]
         val btnStop = createActionButton("🛑 停飛", "#EF4444", "#26EF4444") {
@@ -258,19 +249,23 @@ class PullSeedlingOverlayService : Service() {
             Toast.makeText(this, "🛑 虛擬定位已停止！", Toast.LENGTH_SHORT).show()
         }
 
-        // 按鈕 3：[🟢 關GPS / ⚪ 開GPS] (直接控制，不用跳轉設定頁)
+        // 按鈕 3：[🟢 關GPS / ⚪ 開GPS] (直接控制系統開關)
         val btnGps = createActionButton("🟢 關GPS", "#10B981", "#2210B981") {
             performToggleGps()
         }
         btnGpsRef = btnGps
 
-        // 按鈕 4：[🛑 關遊戲 / 🎮 開遊戲] (遊戲開關一鍵完成)
-        val btnGame = createActionButton("🎮 遊戲", "#38BDF8", "#2238BDF8") {
-            performToggleGame()
+        // 按鈕 4：[🛑 關遊戲] (明確獨立按鈕：一鍵徹底關閉遊戲進程)
+        val btnCloseGame = createActionButton("🛑 關遊戲", "#F43F5E", "#26F43F5E") {
+            performForceCloseGame()
         }
-        btnGameRef = btnGame
 
-        // 按鈕 5：[✕ 關閉懸浮窗]
+        // 按鈕 5：[🎮 開遊戲] (明確獨立按鈕：一鍵快速開啟 Pikmin Bloom)
+        val btnOpenGame = createActionButton("🎮 開遊戲", "#38BDF8", "#2238BDF8") {
+            performLaunchGame()
+        }
+
+        // 按鈕 6：[✕ 關閉懸浮窗]
         val btnClose = createActionButton("✕", "#94A3B8", "#1E334155") {
             stopSelf()
         }
@@ -278,7 +273,8 @@ class PullSeedlingOverlayService : Service() {
         actionsContainer.addView(btnFly)
         actionsContainer.addView(btnStop)
         actionsContainer.addView(btnGps)
-        actionsContainer.addView(btnGame)
+        actionsContainer.addView(btnCloseGame)
+        actionsContainer.addView(btnOpenGame)
         actionsContainer.addView(btnClose)
 
         rootLayout.addView(badge)
@@ -287,25 +283,13 @@ class PullSeedlingOverlayService : Service() {
         overlayView = rootLayout
         windowManager?.addView(overlayView, params)
 
-        refreshAllButtonStates()
+        updateGpsButtonUI()
     }
 
     /**
-     * 初始化系統監聽（剪貼簿自動辨識 + GPS 狀態變動監聽）
+     * 初始化 GPS 狀態廣播監聽
      */
     private fun initSystemListeners() {
-        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-
-        // 1. 剪貼簿即時監聽：一複製座標就自動填入，並更新偏好設定
-        clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-            checkAndApplyClipboardCoordinate(showToast = true)
-        }
-        clipboardManager?.addPrimaryClipChangedListener(clipListener)
-
-        // 啟動時先檢查一次剪貼簿
-        checkAndApplyClipboardCoordinate(showToast = false)
-
-        // 2. GPS 狀態變更廣播監聽
         gpsReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == LocationManager.PROVIDERS_CHANGED_ACTION) {
@@ -318,51 +302,16 @@ class PullSeedlingOverlayService : Service() {
     }
 
     /**
-     * 自動檢查剪貼簿並填入新座標
-     */
-    private fun checkAndApplyClipboardCoordinate(showToast: Boolean) {
-        val clip = clipboardManager?.primaryClip
-        if (clip != null && clip.itemCount > 0) {
-            val text = clip.getItemAt(0)?.text?.toString() ?: ""
-            val extracted = GeoUtils.extractCoordinatesFromText(text)
-            if (extracted != null) {
-                val isNew = abs(extracted.latitude - prefs.lastPullSeedlingLat) > 0.00001 ||
-                        abs(extracted.longitude - prefs.lastPullSeedlingLng) > 0.00001
-                prefs.lastPullSeedlingLat = extracted.latitude
-                prefs.lastPullSeedlingLng = extracted.longitude
-
-                if (showToast && isNew) {
-                    Toast.makeText(
-                        this,
-                        "🌱 已自動填入複製座標：${String.format(Locale.US, "%.5f, %.5f", extracted.latitude, extracted.longitude)}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
-        }
-    }
-
-    /**
-     * 執行傳送至目標金盆座標
+     * 執行傳送至金盆座標：
+     * 透過 TransparentClipboardActivity 獲得真實焦點，保證 100% 讀到 Android 剪貼簿最新座標並即刻傳送
      */
     private fun performFlyToTarget() {
-        // 優先再次讀取最新剪貼簿
-        checkAndApplyClipboardCoordinate(showToast = false)
-
-        val targetLat = prefs.lastPullSeedlingLat
-        val targetLng = prefs.lastPullSeedlingLng
-
-        if (targetLat == 0.0 && targetLng == 0.0) {
-            Toast.makeText(this, "⚠️ 尚未偵測到座標，請先複製金盆座標！", Toast.LENGTH_SHORT).show()
-            return
+        val intent = Intent(this, TransparentClipboardActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
         }
-
-        MockLocationService.start(this, LocationPoint(targetLat, targetLng))
-        Toast.makeText(
-            this,
-            "🌱 已飛至目標座標：${String.format(Locale.US, "%.5f, %.5f", targetLat, targetLng)}",
-            Toast.LENGTH_SHORT
-        ).show()
+        startActivity(intent)
     }
 
     /**
@@ -373,7 +322,7 @@ class PullSeedlingOverlayService : Service() {
         val targetGps = !currentGps
 
         serviceScope.launch {
-            // 優先嘗試背景直接切換（Root 或 Secure Settings）
+            // 嘗試透過 Root 或 Secure Settings 直接開關
             val success = withContext(Dispatchers.IO) {
                 RootShell.setGpsEnabled(this@PullSeedlingOverlayService, targetGps)
             }
@@ -383,7 +332,6 @@ class PullSeedlingOverlayService : Service() {
                 val msg = if (targetGps) "🟢 GPS 已開啟！" else "⚪ GPS 已關閉！"
                 Toast.makeText(this@PullSeedlingOverlayService, msg, Toast.LENGTH_SHORT).show()
             } else {
-                // 若無 Root / Secure Settings 權限，安全 Fallback 開啟系統設定頁
                 Toast.makeText(this@PullSeedlingOverlayService, "正在開啟系統定位開關...", Toast.LENGTH_SHORT).show()
                 try {
                     val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
@@ -398,50 +346,33 @@ class PullSeedlingOverlayService : Service() {
     }
 
     /**
-     * 執行開關 Pikmin Bloom 遊戲（一鍵完全關閉或啟動）
+     * 執行一鍵關閉 Pikmin Bloom 遊戲（相當於手動滑掉程式）
      */
-    private fun performToggleGame() {
+    private fun performForceCloseGame() {
         serviceScope.launch {
-            val isRunning = withContext(Dispatchers.IO) {
-                RootShell.isPackageRunning(this@PullSeedlingOverlayService, PIKMIN_PACKAGE)
+            val stopped = withContext(Dispatchers.IO) {
+                RootShell.forceStopPackage(this@PullSeedlingOverlayService, PIKMIN_PACKAGE)
             }
 
-            if (isRunning) {
-                // 遊戲正在執行中 -> 執行「一鍵關閉遊戲（相當於滑掉程式）」
-                val stopped = withContext(Dispatchers.IO) {
-                    RootShell.forceStopPackage(this@PullSeedlingOverlayService, PIKMIN_PACKAGE)
-                }
-                if (stopped) {
-                    updateGameButtonUI(false)
-                    Toast.makeText(this@PullSeedlingOverlayService, "🛑 Pikmin Bloom 已完全關閉！", Toast.LENGTH_SHORT).show()
-                } else {
-                    // 無 Root 時引導至應用程式資訊點擊強制停止
-                    Toast.makeText(this@PullSeedlingOverlayService, "請點擊「強行停止」以關閉遊戲", Toast.LENGTH_SHORT).show()
-                    RootShell.openAppSettings(this@PullSeedlingOverlayService, PIKMIN_PACKAGE)
-                }
+            if (stopped) {
+                Toast.makeText(this@PullSeedlingOverlayService, "🛑 Pikmin Bloom 已完全強制關閉！", Toast.LENGTH_SHORT).show()
             } else {
-                // 遊戲未執行 -> 啟動遊戲
-                val started = RootShell.launchPackage(this@PullSeedlingOverlayService, PIKMIN_PACKAGE)
-                if (started) {
-                    updateGameButtonUI(true)
-                    Toast.makeText(this@PullSeedlingOverlayService, "🎮 正在啟動 Pikmin Bloom...", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@PullSeedlingOverlayService, "未安裝 Pikmin Bloom 遊戲", Toast.LENGTH_SHORT).show()
-                }
+                // 無 Root 設備引導至應用程式資訊頁面手動點擊「強行停止」
+                Toast.makeText(this@PullSeedlingOverlayService, "⚠️ 請點擊頁面上的「強行停止」以關閉遊戲", Toast.LENGTH_LONG).show()
+                RootShell.openAppSettings(this@PullSeedlingOverlayService, PIKMIN_PACKAGE)
             }
         }
     }
 
     /**
-     * 刷新所有按鈕的即時狀態
+     * 執行啟動 Pikmin Bloom 遊戲
      */
-    private fun refreshAllButtonStates() {
-        updateGpsButtonUI()
-        serviceScope.launch {
-            val isRunning = withContext(Dispatchers.IO) {
-                RootShell.isPackageRunning(this@PullSeedlingOverlayService, PIKMIN_PACKAGE)
-            }
-            updateGameButtonUI(isRunning)
+    private fun performLaunchGame() {
+        val started = RootShell.launchPackage(this, PIKMIN_PACKAGE)
+        if (started) {
+            Toast.makeText(this, "🎮 正在啟動 Pikmin Bloom...", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "未安裝 Pikmin Bloom 遊戲", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -459,22 +390,6 @@ class PullSeedlingOverlayService : Service() {
             btn.text = "⚪ 開GPS"
             btn.setTextColor(Color.parseColor("#F59E0B"))
             (btn.background as? GradientDrawable)?.setColor(Color.parseColor("#26F59E0B"))
-        }
-    }
-
-    /**
-     * 更新遊戲開關按鈕 UI
-     */
-    private fun updateGameButtonUI(isRunning: Boolean) {
-        val btn = btnGameRef ?: return
-        if (isRunning) {
-            btn.text = "🛑 關遊戲"
-            btn.setTextColor(Color.parseColor("#EF4444"))
-            (btn.background as? GradientDrawable)?.setColor(Color.parseColor("#26EF4444"))
-        } else {
-            btn.text = "🎮 開遊戲"
-            btn.setTextColor(Color.parseColor("#38BDF8"))
-            (btn.background as? GradientDrawable)?.setColor(Color.parseColor("#2238BDF8"))
         }
     }
 }
