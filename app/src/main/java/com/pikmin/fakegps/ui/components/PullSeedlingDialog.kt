@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.pikmin.fakegps.data.repository.PreferencesRepo
 import com.pikmin.fakegps.service.PullSeedlingOverlayService
 import com.pikmin.fakegps.utils.GeoUtils
+import com.pikmin.fakegps.utils.RootShell
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.util.Locale
@@ -41,9 +42,9 @@ import java.util.Locale
  * 🍄 金盆拉盆助手 (Sprout Pulling Assistant - 方案 A 通用標準版)
  *
  * 專門針對 Pikmin Bloom「拉金盆 / 巨花」流程設計的標準工作流對話框：
- * 1. 確認目標與傳送就位
- * 2. 關閉遊戲與停止飛人
- * 3. 關閉手機系統 GPS 定位
+ * 1. 自動偵測剪貼簿座標，一鍵傳送就位
+ * 2. 一鍵完全關閉遊戲（免手動滑掉）與停止飛人
+ * 3. 一鍵直接開關手機系統 GPS 定位（免跳轉設定頁）
  * 4. 開啟遊戲與同步拉盆
  */
 @Composable
@@ -72,11 +73,29 @@ fun PullSeedlingDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // 即時偵測系統 GPS 開關狀態
-    var isGpsEnabled by remember { mutableStateOf(isSystemLocationEnabled(context)) }
+    var isGpsEnabled by remember { mutableStateOf(RootShell.isGpsEnabled(context)) }
     LaunchedEffect(Unit) {
+        // 開啟對話框時：自動讀取剪貼簿並填好座標
+        try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = clipboard?.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val clipText = clip.getItemAt(0)?.text?.toString() ?: ""
+                val extracted = GeoUtils.extractCoordinatesFromText(clipText)
+                if (extracted != null) {
+                    latText = String.format(Locale.US, "%.6f", extracted.latitude)
+                    lngText = String.format(Locale.US, "%.6f", extracted.longitude)
+                    prefs.lastPullSeedlingLat = extracted.latitude
+                    prefs.lastPullSeedlingLng = extracted.longitude
+                    Toast.makeText(context, "🌱 已自動填入剪貼簿金盆座標", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 定期更新 GPS 狀態
         while (isActive) {
-            isGpsEnabled = isSystemLocationEnabled(context)
-            delay(1000)
+            isGpsEnabled = RootShell.isGpsEnabled(context)
+            delay(800)
         }
     }
 
@@ -143,63 +162,60 @@ fun PullSeedlingDialog(
                                 .padding(horizontal = 2.dp)
                                 .clickable { currentStep = stepNum }
                         ) {
-                            Box(
-                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = if (isDone) "✓ $stepNum" else "$stepNum",
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                                    color = when {
-                                        isCurrent -> MaterialTheme.colorScheme.onPrimary
-                                        isDone -> Color(0xFF10B981)
-                                        else -> MaterialTheme.colorScheme.outline
-                                    }
-                                )
-                            }
+                            Text(
+                                text = "${stepNum}",
+                                fontSize = 12.sp,
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                color = when {
+                                    isCurrent -> MaterialTheme.colorScheme.onPrimary
+                                    isDone -> Color(0xFF10B981)
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier
+                                    .padding(vertical = 6.dp)
+                                    .wrapContentWidth(Alignment.CenterHorizontally)
+                            )
                         }
                     }
                 }
 
-                HorizontalDivider()
-
-                // 🎈 遊戲懸浮迷你控制器快捷切換
+                // 懸浮迷你控制器開關橫條
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = if (isOverlayRunning) Color(0xFF10B981).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    border = if (isOverlayRunning) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981)) else null,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(text = "🎈", fontSize = 18.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = if (isOverlayRunning) "遊戲懸浮控制器：運行中" else "遊戲上方懸浮迷你控制器",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isOverlayRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "在遊戲畫面上層 1 秒完成各項拉盆動作",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("🌱 遊戲內懸浮控制器", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                if (isOverlayRunning) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFF10B981).copy(alpha = 0.15f)
+                                    ) {
+                                        Text("已開啟", color = Color(0xFF10B981), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                    }
+                                }
                             }
+                            Text(
+                                text = "浮在遊戲畫面最上方，一鍵飛目標/關GPS/關遊戲",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                         Switch(
                             checked = isOverlayRunning,
-                            onCheckedChange = { enabled ->
-                                if (enabled) {
+                            onCheckedChange = { enable ->
+                                if (enable) {
                                     PullSeedlingOverlayService.start(context)
                                 } else {
                                     PullSeedlingOverlayService.stop(context)
@@ -209,23 +225,23 @@ fun PullSeedlingDialog(
                     }
                 }
 
-                // 各步驟主要內容
+                // 當前步驟內容區塊
                 when (currentStep) {
                     // ===== 步驟 1：確認目標與傳送就位 =====
                     1 -> {
                         Text(
-                            text = "步驟 1：輸入目標座標並傳送就位",
+                            text = "步驟 1：確認目標金盆座標並傳送就位",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "請輸入或貼上目標金盆／巨花座標。點擊傳送後，可直接開啟遊戲確認目標已出現在畫面上。",
+                            text = "複製目標金盆座標後會自動填入，點擊傳送即可飛至目標位置確認金盆／巨花存在：",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        // 快捷載入列：[📋 貼上剪貼簿] [📍 載入地圖目前座標]
+                        // 快速填入按鈕組
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -233,18 +249,16 @@ fun PullSeedlingDialog(
                             OutlinedButton(
                                 onClick = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                    val clipData = clipboard?.primaryClip
-                                    if (clipData != null && clipData.itemCount > 0) {
-                                        val text = clipData.getItemAt(0).text?.toString() ?: ""
-                                        val extracted = GeoUtils.extractCoordinatesFromText(text)
-                                        if (extracted != null) {
-                                            latText = String.format(Locale.US, "%.6f", extracted.latitude)
-                                            lngText = String.format(Locale.US, "%.6f", extracted.longitude)
-                                            errorMessage = null
-                                            Toast.makeText(context, "已套用剪貼簿座標", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(context, "剪貼簿中未偵測到有效座標", Toast.LENGTH_SHORT).show()
-                                        }
+                                    val clip = clipboard?.primaryClip
+                                    val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0)?.text?.toString() ?: "" else ""
+                                    val extracted = GeoUtils.extractCoordinatesFromText(text)
+                                    if (extracted != null) {
+                                        latText = String.format(Locale.US, "%.6f", extracted.latitude)
+                                        lngText = String.format(Locale.US, "%.6f", extracted.longitude)
+                                        errorMessage = null
+                                        Toast.makeText(context, "已讀取剪貼簿座標！", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        errorMessage = "剪貼簿內未偵測到經緯度座標"
                                     }
                                 },
                                 modifier = Modifier.weight(1f),
@@ -252,7 +266,7 @@ fun PullSeedlingDialog(
                             ) {
                                 Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("貼上剪貼簿", fontSize = 12.sp)
+                                Text("從剪貼簿貼上", fontSize = 12.sp)
                             }
 
                             OutlinedButton(
@@ -426,17 +440,37 @@ fun PullSeedlingDialog(
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
                                     text = "② 完整關閉 Pikmin Bloom 遊戲",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp
                                 )
                                 Text(
-                                    text = "• 請在手機多工切換畫面中，將 Pikmin Bloom 向上滑掉完全關閉。\n• 若想確保徹底結束，可點擊下方捷徑前往應用資訊點擊「強行停止」。",
+                                    text = "可點擊下方按鈕一鍵徹底關閉遊戲（免手動滑掉）：",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+
+                                Button(
+                                    onClick = {
+                                        val stopped = RootShell.forceStopPackage(context, PullSeedlingOverlayService.PIKMIN_PACKAGE)
+                                        if (stopped) {
+                                            Toast.makeText(context, "🛑 Pikmin Bloom 已完全關閉！", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "請點擊「強行停止」以關閉遊戲", Toast.LENGTH_SHORT).show()
+                                            openPikminAppSettings(context)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("🛑 一鍵完全關閉遊戲 (免手動滑掉)", fontSize = 12.5.sp)
+                                }
+
                                 OutlinedButton(
                                     onClick = { openPikminAppSettings(context) },
                                     shape = RoundedCornerShape(10.dp),
@@ -444,7 +478,7 @@ fun PullSeedlingDialog(
                                 ) {
                                     Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("開啟遊戲詳細資訊 (可強行停止)", fontSize = 12.sp)
+                                    Text("開啟遊戲詳細資訊 (備用手動強停)", fontSize = 12.sp)
                                 }
                             }
                         }
@@ -459,7 +493,7 @@ fun PullSeedlingDialog(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "拉盆的關鍵機制是在「無 GPS 訊號」狀態下啟動遊戲。請將手機系統定位開關關閉。",
+                            text = "拉盆的關鍵機制是在「無 GPS 訊號」狀態下啟動遊戲。請直接點擊開關切換：",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -493,7 +527,7 @@ fun PullSeedlingDialog(
                                         color = if (!isGpsEnabled) Color(0xFF10B981) else Color(0xFFD97706)
                                     )
                                     Text(
-                                        text = if (!isGpsEnabled) "已符合拉盆啟動條件，請進行下一步。" else "請點擊下方按鈕前往關閉手機定位。",
+                                        text = if (!isGpsEnabled) "已符合拉盆啟動條件，請進行下一步。" else "點擊下方按鈕直接切換 GPS。",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -501,15 +535,38 @@ fun PullSeedlingDialog(
                             }
                         }
 
-                        // 一鍵前往定位設定
+                        // 一鍵直接開關 GPS (無需跳轉設定頁)
                         Button(
+                            onClick = {
+                                val target = !isGpsEnabled
+                                val handled = RootShell.setGpsEnabled(context, target)
+                                if (handled) {
+                                    isGpsEnabled = target
+                                    Toast.makeText(context, if (target) "🟢 GPS 已開啟！" else "⚪ GPS 已關閉！", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "正在開啟系統設定頁...", Toast.LENGTH_SHORT).show()
+                                    openLocationSettings(context)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isGpsEnabled) Color(0xFFEF4444) else Color(0xFF10B981)
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.LocationOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (isGpsEnabled) "⚪ 點擊直接關閉手機 GPS" else "🟢 點擊直接開啟手機 GPS")
+                        }
+
+                        OutlinedButton(
                             onClick = { openLocationSettings(context) },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("⚙️ 快速開啟系統定位設定關閉 GPS")
+                            Text("⚙️ 開啟系統定位設定頁面 (備用)", fontSize = 12.sp)
                         }
                     }
 
@@ -536,7 +593,7 @@ fun PullSeedlingDialog(
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("💡 拉盆最後動作說明：", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text(
-                                    "1. 點擊下方按鈕啟動 Pikmin Bloom。\n2. 遊戲進入後會因無 GPS 而停留在遠端目標快取，並顯示「請開啟定位功能」或 GPS 訊號未找到。\n3. 此時下拉手機通知列或在系統提示時「開啟定位」。\n4. 遊戲讀取到真實座標與遠端快取的轉移，即可順利拉取金盆！",
+                                    "1. 點擊下方按鈕啟動 Pikmin Bloom。\n2. 遊戲進入後會因無 GPS 而停留在遠端目標快取，並提示「請開啟定位功能」。\n3. 此時在懸浮控制器點擊「⚪ 開GPS」或下拉通知列開啟定位。\n4. 遊戲讀取到位置切換，即可順利拉取金盆！",
                                     fontSize = 12.sp,
                                     lineHeight = 18.sp
                                 )
@@ -553,6 +610,26 @@ fun PullSeedlingDialog(
                             Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("🎮 立即啟動 Pikmin Bloom 開拉！", fontWeight = FontWeight.Bold)
+                        }
+
+                        if (!isGpsEnabled) {
+                            OutlinedButton(
+                                onClick = {
+                                    val handled = RootShell.setGpsEnabled(context, true)
+                                    if (handled) {
+                                        isGpsEnabled = true
+                                        Toast.makeText(context, "🟢 GPS 已開啟！", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        openLocationSettings(context)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("🟢 恢復開啟系統 GPS 定位")
+                            }
                         }
                     }
                 }
@@ -614,25 +691,11 @@ fun PullSeedlingDialog(
 }
 
 private fun launchPikminBloom(context: Context) {
-    val intent = context.packageManager.getLaunchIntentForPackage("com.nianticlabs.pikmin")
-    if (intent != null) {
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-    } else {
-        Toast.makeText(context, "未安裝 Pikmin Bloom 遊戲", Toast.LENGTH_SHORT).show()
-    }
+    RootShell.launchPackage(context, PullSeedlingOverlayService.PIKMIN_PACKAGE)
 }
 
 private fun openPikminAppSettings(context: Context) {
-    try {
-        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", "com.nianticlabs.pikmin", null)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        Toast.makeText(context, "無法開啟應用程式資訊頁面", Toast.LENGTH_SHORT).show()
-    }
+    RootShell.openAppSettings(context, PullSeedlingOverlayService.PIKMIN_PACKAGE)
 }
 
 private fun openLocationSettings(context: Context) {
@@ -643,16 +706,5 @@ private fun openLocationSettings(context: Context) {
         context.startActivity(intent)
     } catch (e: Exception) {
         Toast.makeText(context, "無法開啟定位設定頁面", Toast.LENGTH_SHORT).show()
-    }
-}
-
-private fun isSystemLocationEnabled(context: Context): Boolean {
-    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        lm.isLocationEnabled
-    } else {
-        @Suppress("DEPRECATION")
-        lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
     }
 }

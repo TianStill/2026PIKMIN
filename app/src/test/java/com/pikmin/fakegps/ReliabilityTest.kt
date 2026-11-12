@@ -255,5 +255,21 @@ class ReliabilityTest {
         assertNotNull(extracted)
         assertEquals(25.033964, extracted!!.latitude, 0.000001)
         assertEquals(121.564468, extracted.longitude, 0.000001)
+
+        val googleMapsUrl = "https://maps.google.com/?q=24.123456,120.654321"
+        val extractedUrl = GeoUtils.extractCoordinatesFromText(googleMapsUrl)
+        assertNotNull(extractedUrl)
+        assertEquals(24.123456, extractedUrl!!.latitude, 0.000001)
+        assertEquals(120.654321, extractedUrl.longitude, 0.000001)
+    }
+
+    @Test fun rootShellCommandResultProperties() {
+        val success = com.pikmin.fakegps.utils.RootShell.CommandResult(0, "uid=0(root)", "")
+        assertTrue(success.isSuccess)
+        assertEquals("uid=0(root)", success.stdout)
+
+        val failure = com.pikmin.fakegps.utils.RootShell.CommandResult(1, "", "Permission denied")
+        assertFalse(failure.isSuccess)
+        assertEquals("Permission denied", failure.stderr)
     }
 }

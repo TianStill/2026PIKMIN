@@ -24,6 +24,11 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 懸浮拉盆控制器權限 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 輔助清理後台與系統定位開關 (若有 ADB/Root 授權) -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- 宣告查詢 Pikmin Bloom 遊戲 Package Visibility (Android 11+) -->
     <queries>
