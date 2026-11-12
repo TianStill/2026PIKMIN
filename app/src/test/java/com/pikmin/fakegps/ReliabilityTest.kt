@@ -248,4 +248,12 @@ class ReliabilityTest {
         assertEquals(220.0, custom.stepMeters, 0.001)
         assertEquals(10f, custom.cruiseSpeedMps, 0.001f)
     }
+
+    @Test fun pullSeedlingCoordinatesExtractionAndValidation() {
+        val testText = "金色巨花 25.033964, 121.564468 台北101"
+        val extracted = GeoUtils.extractCoordinatesFromText(testText)
+        assertNotNull(extracted)
+        assertEquals(25.033964, extracted!!.latitude, 0.000001)
+        assertEquals(121.564468, extracted.longitude, 0.000001)
+    }
 }

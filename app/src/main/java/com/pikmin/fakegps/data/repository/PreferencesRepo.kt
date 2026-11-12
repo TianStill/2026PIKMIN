@@ -40,6 +40,8 @@ class PreferencesRepo(context: Context) {
         private const val KEY_DRONE_DWELL_SECONDS = "key_drone_dwell_seconds"
         private const val KEY_DRONE_STEP_METERS = "key_drone_step_meters"
         private const val KEY_DRONE_CRUISE_SPEED_MPS = "key_drone_cruise_speed_mps"
+        private const val KEY_LAST_PULL_LAT = "key_last_pull_lat"
+        private const val KEY_LAST_PULL_LNG = "key_last_pull_lng"
         private const val MAX_DISCOVERED_MUSHROOMS = 200
 
         // 預設台北 101 座標
@@ -55,6 +57,14 @@ class PreferencesRepo(context: Context) {
     var lastLongitude: Double
         get() = prefs.getString(KEY_LAST_LNG, DEFAULT_LNG.toString())?.toDoubleOrNull() ?: DEFAULT_LNG
         set(value) = prefs.edit().putString(KEY_LAST_LNG, value.toString()).apply()
+
+    var lastPullSeedlingLat: Double
+        get() = prefs.getString(KEY_LAST_PULL_LAT, DEFAULT_LAT.toString())?.toDoubleOrNull() ?: DEFAULT_LAT
+        set(value) = prefs.edit().putString(KEY_LAST_PULL_LAT, value.toString()).apply()
+
+    var lastPullSeedlingLng: Double
+        get() = prefs.getString(KEY_LAST_PULL_LNG, DEFAULT_LNG.toString())?.toDoubleOrNull() ?: DEFAULT_LNG
+        set(value) = prefs.edit().putString(KEY_LAST_PULL_LNG, value.toString()).apply()
 
     var lastZoom: Double
         get() = prefs.getFloat(KEY_LAST_ZOOM, DEFAULT_ZOOM.toFloat()).toDouble()

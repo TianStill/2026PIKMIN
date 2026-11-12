@@ -23,6 +23,11 @@
     <!-- 應用程式內直接安裝更新權限 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- 宣告查詢 Pikmin Bloom 遊戲 Package Visibility (Android 11+) -->
+    <queries>
+        <package android:name="com.nianticlabs.pikmin" />
+    </queries>
+
     <application
         android:name=".FakeGpsApplication"
         android:allowBackup="true"

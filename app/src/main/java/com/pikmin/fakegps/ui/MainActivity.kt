@@ -169,6 +169,7 @@ fun MainScreen(viewModel: MainViewModel) {
     var showCoordinatesDialog by remember { mutableStateOf(false) }
     var showLayerMenu by remember { mutableStateOf(false) }
     var showDroneDialog by remember { mutableStateOf(false) }
+    var showPullSeedlingDialog by remember { mutableStateOf(false) }
     val openDronePanel by viewModel.openDronePanel.collectAsState()
     LaunchedEffect(openDronePanel) {
         if (openDronePanel) { showDroneDialog = true; viewModel.openDronePanel.value = false }
@@ -437,6 +438,19 @@ fun MainScreen(viewModel: MainViewModel) {
                                 modifier = Modifier.size(24.dp)
                             )
                         }
+
+                        // 🌱 8. 金盆拉盆助手 (Sprout Pulling Assistant - 方案 A 標準版)
+                        IconButton(
+                            onClick = { showPullSeedlingDialog = true },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalFlorist,
+                                contentDescription = "Sprout Pulling Assistant",
+                                tint = Color(0xFF10B981),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -611,6 +625,23 @@ fun MainScreen(viewModel: MainViewModel) {
                         com.pikmin.fakegps.drone.DroneScannerManager.stopScan()
                     },
                     onDismiss = { showDroneDialog = false }
+                )
+            }
+
+            // 金盆拉盆助手 Dialog (方案 A 標準版工作流)
+            if (showPullSeedlingDialog) {
+                PullSeedlingDialog(
+                    initialLat = targetLocation.latitude,
+                    initialLng = targetLocation.longitude,
+                    isMocking = isMocking,
+                    onStartMocking = { lat, lng ->
+                        viewModel.setTargetLocation(lat, lng)
+                        viewModel.startMocking()
+                    },
+                    onStopMocking = {
+                        viewModel.stopMocking()
+                    },
+                    onDismiss = { showPullSeedlingDialog = false }
                 )
             }
 
