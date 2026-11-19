@@ -218,7 +218,7 @@ class PullSeedlingOverlayService : Service() {
                         // 點擊切換 展開 / 收折
                         isExpanded = !isExpanded
                         actionsContainer.visibility = if (isExpanded) View.VISIBLE else View.GONE
-                        badge.text = if (isExpanded) "🌱" else "🌱 拉盆"
+                        badge.text = if (isExpanded) "🌱" else "🌱 控制器"
                         if (isExpanded) {
                             updateGpsButtonUI()
                         }
