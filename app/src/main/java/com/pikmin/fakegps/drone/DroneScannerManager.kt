@@ -146,10 +146,13 @@ object DroneScannerManager {
                     if (mediaProjection === projection) fail("螢幕擷取已中斷，請重新授權後續航")
                 }
                 override fun onCapturedContentResize(width: Int, height: Int) {
-                    // Fixed geometry cannot be reused after rotation or app-window resizing.
+                    if (width <= 0 || height <= 0) return
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    if (pm?.isInteractive == false) return // 螢幕熄滅時忽略暫態尺寸變化
                     val ratio = width.toDouble() / height.coerceAtLeast(1)
-                    if (mediaProjection === projection && kotlin.math.abs(ratio - screenWidth.toDouble() / screenHeight) > 0.05) {
-                        fail("擷取畫面比例已改變，請回到直向全螢幕並重新授權")
+                    val baseRatio = screenWidth.toDouble() / screenHeight.coerceAtLeast(1)
+                    if (mediaProjection === projection && kotlin.math.abs(ratio - baseRatio) > 0.25) {
+                        android.util.Log.w("DroneScanner", "Captured content aspect ratio changed: $ratio vs $baseRatio")
                     }
                 }
             }
@@ -277,29 +280,46 @@ object DroneScannerManager {
         }
     }
 
-    private var wakeLock: PowerManager.WakeLock? = null
+    private var partialWakeLock: PowerManager.WakeLock? = null
+    private var screenWakeLock: PowerManager.WakeLock? = null
 
     private fun acquireWakeLock(context: Context) {
         try {
-            if (wakeLock == null) {
-                val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-                @Suppress("DEPRECATION")
-                wakeLock = pm.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
-                    "FakeGps:DroneScanWakeLock"
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (partialWakeLock == null) {
+                partialWakeLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "FakeGps:DroneScanPartialWakeLock"
                 ).apply { setReferenceCounted(false) }
             }
-            // Renew a bounded lease while scanning, including when the game is foreground.
-            wakeLock?.acquire(120_000L)
+            partialWakeLock?.acquire(180_000L)
+
+            if (screenWakeLock == null) {
+                @Suppress("DEPRECATION")
+                screenWakeLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+                    "FakeGps:DroneScanScreenWakeLock"
+                ).apply { setReferenceCounted(false) }
+            }
+            if (pm.isInteractive) {
+                screenWakeLock?.acquire(180_000L)
+            }
         } catch (e: Exception) {
-            throw IllegalStateException("無法保持螢幕亮起，請檢查省電設定", e)
+            android.util.Log.w("DroneScanner", "WakeLock acquire warning: ${e.message}")
         }
     }
 
     private fun releaseWakeLock() {
         try {
-            if (wakeLock?.isHeld == true) {
-                wakeLock?.release()
+            if (screenWakeLock?.isHeld == true) {
+                screenWakeLock?.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        try {
+            if (partialWakeLock?.isHeld == true) {
+                partialWakeLock?.release()
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -432,27 +452,29 @@ object DroneScannerManager {
                 wakeRenewal = launch {
                     while (isActive) {
                         delay(60_000L)
-                        try { acquireWakeLock(appContext) }
-                        catch (e: Exception) { fail(e.localizedMessage ?: "螢幕保亮失敗"); break }
+                        acquireWakeLock(appContext)
                     }
                 }
                 delay(3000)
                 if (targetTypes.isNotEmpty()) {
-                    val readyAfter = SystemClock.elapsedRealtime()
-                withTimeout(5000) {
-                    while (true) {
-                        val frame = captureCurrentScreen(readyAfter)
-                        if (frame != null) {
-                            val blank = frame.isBlank
-                            frame.bitmap.recycle()
-                            check(!blank) {
-                                "裝置將遊戲畫面保護為黑色；請在開發人員選項暫時開啟「停用螢幕分享保護」後重新授權"
+                    val pm = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    if (pm?.isInteractive != false) {
+                        try {
+                            withTimeout(3000) {
+                                val readyAfter = SystemClock.elapsedRealtime()
+                                while (true) {
+                                    val frame = captureCurrentScreen(readyAfter)
+                                    if (frame != null) {
+                                        frame.bitmap.recycle()
+                                        break
+                                    }
+                                    delay(150)
+                                }
                             }
-                            break
+                        } catch (e: Exception) {
+                            android.util.Log.d("DroneScanner", "初始畫面檢查跳過或超時（將在航點中繼續採樣）：${e.message}")
                         }
-                        delay(100)
                     }
-                }
                 }
                 var lastLocation: LocationPoint? = if (startIndex > 0 && startIndex < waypoints.size) waypoints[startIndex - 1] else waypoints.firstOrNull()
                 for (index in startIndex until waypoints.size) {
@@ -504,6 +526,20 @@ object DroneScannerManager {
                         currentStartIndex = index + 1
                         continue
                     }
+
+                    val pm = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    val isInteractive = pm?.isInteractive ?: true
+
+                    // 🌟 若手機螢幕熄滅（關閉螢幕）：直接跳過視覺辨識，保持背景螺旋巡航前進
+                    if (!isInteractive) {
+                        _status.value = _status.value.copy(
+                            statusMessage = "螢幕待機休眠中，背景持續巡航 (航點 ${index + 1}/${waypoints.size})"
+                        )
+                        delay((dwellSeconds * 1000).toLong().coerceAtLeast(1000))
+                        currentStartIndex = index + 1
+                        continue
+                    }
+
                     delay(1200)
                     val minimumFrameTime = SystemClock.elapsedRealtime()
                     val deadline = minimumFrameTime + (dwellSeconds * 1000).toLong().coerceAtLeast(1400)
@@ -518,15 +554,20 @@ object DroneScannerManager {
                         ((confirmation.hasPendingCandidate || analysedFrames < 3) &&
                             SystemClock.elapsedRealtime() < deadline + 3000L)) {
                         ensureActive()
+
+                        // 若中途關閉螢幕，即刻跳出視覺取幀迴圈，讓巡航能平穩進入下一航點
+                        if (pm?.isInteractive == false) {
+                            android.util.Log.d("DroneScanner", "分析中偵測到螢幕熄滅，暫停本航點視覺採樣")
+                            break
+                        }
+
                         val frame = captureCurrentScreen(lastAnalysed)
                         if (frame != null) {
                             lastAnalysed = frame.time
                             if (frame.isBlank) {
                                 frame.bitmap.recycle()
                                 blankFrames++
-                                check(blankFrames < 3) {
-                                    "裝置將遊戲畫面保護為黑色；請在開發人員選項暫時開啟「停用螢幕分享保護」後重新授權"
-                                }
+                                // 🌟 黑屏時（如切換畫面、過場動畫、遮蔽）不拋異常中止，稍候重試
                                 delay(250)
                                 continue
                             }
@@ -560,7 +601,14 @@ object DroneScannerManager {
                         }
                         delay(250)
                     }
-                    check(analysedFrames >= 3) { "未取得足夠的新畫面，搜尋已暫停，請確認遊戲畫面與擷取權限" }
+
+                    // 🌟 移除 check(analysedFrames >= 3)！
+                    // 當處於非散步風景/鳥瞰風景畫面（如皮克敏列表、背包、明信片、好友選單等），
+                    // 或畫面幀數不足時，絕不拋出異常停止巡航，而是平穩記錄並繼續前進下一個航點。
+                    if (analysedFrames < 3) {
+                        android.util.Log.d("DroneScanner", "航點 ${index + 1} 分析幀數不足 ($analysedFrames < 3)，非地圖畫面或待機中，繼續巡航至下一航點")
+                    }
+
                     if (found != null) {
                         currentStartIndex = index + 1
                         onTargetDiscovered(appContext, found, waypoint, prefs, discoveredMushrooms)
@@ -605,7 +653,7 @@ object DroneScannerManager {
     private data class CapturedFrame(val bitmap: Bitmap, val time: Long, val isBlank: Boolean)
     private fun captureCurrentScreen(after: Long): CapturedFrame? = synchronized(bitmapLock) {
         val current = latestBitmap ?: return@synchronized null
-        if (current.isRecycled || frameTime <= after || SystemClock.elapsedRealtime() - frameTime > 1000) return@synchronized null
+        if (current.isRecycled || frameTime <= after || SystemClock.elapsedRealtime() - frameTime > 3000) return@synchronized null
         CapturedFrame(current.copy(Bitmap.Config.ARGB_8888, false), frameTime, isBlankCapture(current))
     }
 
