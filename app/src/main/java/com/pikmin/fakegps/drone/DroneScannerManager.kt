@@ -71,7 +71,7 @@ data class DroneCruiseProfile(
         val STANDARD = DroneCruiseProfile(1, "🚀 推薦標準", "300m / 2.8s", 300.0, 2.8f, 0f)
         val PRECISE = DroneCruiseProfile(2, "🎯 精細搜尋", "240m / 3.5s", 240.0, 3.5f, 0f)
 
-        val SMOOTH_CRUISE = DroneCruiseProfile(3, "🚲 平滑巡航", "5-12m/s 可調", 200.0, 2.0f, 5f)
+        val SMOOTH_CRUISE = DroneCruiseProfile(3, "🚲 平滑巡航", "1-10m/s 可調", 200.0, 2.0f, 5f)
         @Deprecated("Use SMOOTH_CRUISE", ReplaceWith("SMOOTH_CRUISE"))
         val SPEED_18KMH = SMOOTH_CRUISE
 
@@ -360,7 +360,7 @@ object DroneScannerManager {
         currentSpeedMps = speedMps
         currentStartIndex = 0
 
-        val speedDesc = if (speedMps in 5f..12f) "（${speedMps.toInt()}m/s 巡航）" else ""
+        val speedDesc = if (speedMps in 1f..10f) "（${speedMps.toInt()}m/s 巡航）" else ""
         Toast.makeText(
             context,
             if (isPureCruise) "🛸 無人機純巡航出發${speedDesc}！請確認遊戲地圖已點擊「指南針」回正正北！"
@@ -482,8 +482,8 @@ object DroneScannerManager {
                     currentStartIndex = index // On interruption, retry the unanalysed waypoint.
                     val waypoint = waypoints[index]
 
-                    // 🌟 若設定每秒 5~12 公尺平滑巡航速度，在航點之間以固定速度平滑推進
-                    if (speedMps in 5f..12f && lastLocation != null) {
+                    // 🌟 若設定每秒 1~10 公尺平滑巡航速度，在航點之間以固定速度平滑推進
+                    if (speedMps in 1f..10f && lastLocation != null) {
                         val totalDistance = GeoUtils.calculateDistanceMeters(
                             lastLocation.latitude, lastLocation.longitude,
                             waypoint.latitude, waypoint.longitude
@@ -522,7 +522,7 @@ object DroneScannerManager {
                     _status.value = _status.value.copy(phase = ScanPhase.SCANNING, currentIndex = index + 1,
                         currentCoordinate = waypoint, statusMessage = if (targetTypes.isEmpty()) "正在純巡航航點 ${index + 1}/${waypoints.size}" else "正在分析航點 ${index + 1}/${waypoints.size}")
                     if (targetTypes.isEmpty()) {
-                        delay((dwellSeconds * 1000).toLong().coerceAtLeast(1000))
+                        delay((dwellSeconds * 1000).toLong().coerceAtLeast(0))
                         currentStartIndex = index + 1
                         continue
                     }
@@ -535,14 +535,17 @@ object DroneScannerManager {
                         _status.value = _status.value.copy(
                             statusMessage = "螢幕待機休眠中，背景持續巡航 (航點 ${index + 1}/${waypoints.size})"
                         )
-                        delay((dwellSeconds * 1000).toLong().coerceAtLeast(1000))
+                        delay((dwellSeconds * 1000).toLong().coerceAtLeast(0))
                         currentStartIndex = index + 1
                         continue
                     }
 
-                    delay(1200)
+                    // 依據使用者設定的每點等待時間，動態調整前置緩衝
+                    val prepDelay = if (dwellSeconds <= 0f) 0L else (dwellSeconds * 300).toLong().coerceIn(100L, 1000L)
+                    if (prepDelay > 0) delay(prepDelay)
+
                     val minimumFrameTime = SystemClock.elapsedRealtime()
-                    val deadline = minimumFrameTime + (dwellSeconds * 1000).toLong().coerceAtLeast(1400)
+                    val deadline = minimumFrameTime + (dwellSeconds * 1000).toLong()
                     var lastAnalysed = minimumFrameTime
                     var analysedFrames = 0
                     var blankFrames = 0
@@ -550,9 +553,10 @@ object DroneScannerManager {
                     var found: DetectedMushroom? = null
                     // A candidate arriving near the deadline gets time for three-frame confirmation.
                     // The extension is bounded so unrelated flickering colors cannot stall a route.
+                    val maxWait = if (dwellSeconds <= 0f) deadline + 500L else deadline + 2500L
                     while (SystemClock.elapsedRealtime() < deadline ||
-                        ((confirmation.hasPendingCandidate || analysedFrames < 3) &&
-                            SystemClock.elapsedRealtime() < deadline + 3000L)) {
+                        ((confirmation.hasPendingCandidate || (dwellSeconds > 0f && analysedFrames < 3)) &&
+                            SystemClock.elapsedRealtime() < maxWait)) {
                         ensureActive()
 
                         // 若中途關閉螢幕，即刻跳出視覺取幀迴圈，讓巡航能平穩進入下一航點

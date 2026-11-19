@@ -634,7 +634,7 @@ fun DroneScannerDialog(
                         }
                     }
 
-                    // 🏃 巡航移動速度 (每秒公尺數) 滑桿：5-12 公尺
+                    // 🏃 巡航移動速度 (每秒公尺數) 滑桿：1-10 公尺
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -661,13 +661,13 @@ fun DroneScannerDialog(
                                 cruiseSpeedMps = it
                                 speedMode = DroneCruiseProfile.SMOOTH_CRUISE.modeId
                             },
-                            valueRange = 5f..12f,
-                            steps = 6,
+                            valueRange = 1f..10f,
+                            steps = 8,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
 
-                    // ⏱️ 每點等待時間 (微調)
+                    // ⏱️ 每點等待時間 (微調)：0-5 秒
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -680,8 +680,8 @@ fun DroneScannerDialog(
                         Slider(
                             value = dwellSeconds,
                             onValueChange = { dwellSeconds = it },
-                            valueRange = 1.5f..5.0f,
-                            steps = 6,
+                            valueRange = 0f..5.0f,
+                            steps = 9,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }

@@ -326,7 +326,27 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         }
 
-                        // 🗺️ 2. 地圖圖層切換 (Google 道路 / 衛星 / 地形 / OSM)
+                        // 🌱 2. 遊戲內懸浮控制器 (一鍵開啟/關閉，位於定位點下方)
+                        IconButton(
+                            onClick = {
+                                if (isOverlayRunning) {
+                                    PullSeedlingOverlayService.stop(context)
+                                    Toast.makeText(context, "🌱 懸浮控制器已關閉", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    PullSeedlingOverlayService.start(context)
+                                }
+                            },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalFlorist,
+                                contentDescription = "遊戲內懸浮控制器",
+                                tint = if (isOverlayRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        // 🗺️ 3. 地圖圖層切換 (Google 道路 / 衛星 / 地形 / OSM)
                         Box {
                             IconButton(
                                 onClick = { showLayerMenu = true },
@@ -370,7 +390,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         }
 
-                        // 📋 3. 自動偵測剪貼簿座標開關
+                        // 📋 4. 自動偵測剪貼簿座標開關
                         IconButton(
                             onClick = {
                                 val newState = !isAutoClipboardEnabled
@@ -388,7 +408,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         }
 
-                        // ⭐ 4. 我的書籤收藏
+                        // ⭐ 5. 我的書籤收藏
                         IconButton(
                             onClick = { showFavoritesSheet = true },
                             modifier = Modifier.size(44.dp)
@@ -401,7 +421,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         }
 
-                        // 🕒 5. 定位歷史紀錄 (最新 3 筆)
+                        // 🕒 6. 定位歷史紀錄 (最新 3 筆)
                         IconButton(
                             onClick = { showHistorySheet = true },
                             modifier = Modifier.size(44.dp)
@@ -414,7 +434,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         }
 
-                        // ✍️ 6. 手動精確輸入經緯度
+                        // ✍️ 7. 手動精確輸入經緯度
                         IconButton(
                             onClick = { showCoordinatesDialog = true },
                             modifier = Modifier.size(44.dp)
@@ -427,7 +447,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         }
 
-                        // 🛸 7. 無人機尋菇雷達 (電腦視覺自動巡航)
+                        // 🛸 8. 無人機尋菇雷達 (電腦視覺自動巡航)
                         IconButton(
                             onClick = { showDroneDialog = true },
                             modifier = Modifier.size(44.dp)
@@ -436,26 +456,6 @@ fun MainScreen(viewModel: MainViewModel) {
                                 imageVector = Icons.Default.Radar,
                                 contentDescription = "Drone Radar",
                                 tint = if (droneStatus.isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        // 🌱 8. 遊戲內懸浮控制器 (一鍵開啟/關閉)
-                        IconButton(
-                            onClick = {
-                                if (isOverlayRunning) {
-                                    PullSeedlingOverlayService.stop(context)
-                                    Toast.makeText(context, "🌱 懸浮控制器已關閉", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    PullSeedlingOverlayService.start(context)
-                                }
-                            },
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.LocalFlorist,
-                                contentDescription = "遊戲內懸浮控制器",
-                                tint = if (isOverlayRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(24.dp)
                             )
                         }

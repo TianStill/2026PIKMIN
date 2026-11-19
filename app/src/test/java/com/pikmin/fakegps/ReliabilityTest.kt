@@ -186,8 +186,8 @@ class ReliabilityTest {
         assertTrue(DroneCruiseProfile.ALL.any { it.modeId == 3 })
     }
 
-    @Test fun cruiseSpeedRangeAcceptsFiveToTwelveMps() {
-        for (speed in 5..12) {
+    @Test fun cruiseSpeedRangeAcceptsOneToTenMps() {
+        for (speed in 1..10) {
             val (nextLat, nextLng) = GeoUtils.calculateNextCoordinate(25.0, 121.0, speed.toFloat(), 90f, 1.0)
             val dist = GeoUtils.calculateDistanceMeters(25.0, 121.0, nextLat, nextLng)
             assertEquals(speed.toDouble(), dist, 0.05)
